@@ -17,6 +17,7 @@ import { SharedModule } from '../shared';
           { path: 'default-value', loadChildren: './field-options/default-value/config.module#ConfigModule' },
           { path: 'hide-fields', loadChildren: './field-options/hide-fields/config.module#ConfigModule' },
           { path: 'model-options', loadChildren: './field-options/model-options/config.module#ConfigModule' },
+          { path: 'safe-html', loadChildren: './field-options/safe-html/config.module#ConfigModule' },
         ]},
 
         // Form Options

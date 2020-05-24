@@ -212,6 +212,10 @@ export interface FormlyTemplateOptions {
   readonly?: boolean;
   attributes?: { [key: string]: string|number };
   step?: number;
+  /**
+   * Allows html markup in label
+   */
+  safeHtml?: boolean;
   focus?: FormlyAttributeEvent;
   blur?: FormlyAttributeEvent;
   keyup?: FormlyAttributeEvent;

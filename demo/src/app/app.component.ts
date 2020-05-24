@@ -48,6 +48,7 @@ export class AppComponent {
         { path: '/examples/field-options/default-value', title: 'Default Value' },
         { path: '/examples/field-options/hide-fields', title: 'Hide Fields' },
         { path: '/examples/field-options/model-options', title: 'modelOptions' },
+        { path: '/examples/field-options/safe-html', title: 'safeHtml' },
 
         { title: 'Form Options' },
         { path: '/examples/form-options/reset-model', title: 'Reset Model' },
