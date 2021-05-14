@@ -1,10 +1,45 @@
 
 import { FormlyJsonschema } from './formly-json-schema.service';
 import { JSONSchema7 } from 'json-schema';
-import { FormlyFieldConfig, FormlyTemplateOptions, FormlyFormBuilder, FormlyModule } from '@ngx-formly/core';
-import { FormControl, FormGroup } from '@angular/forms';
-import { inject, TestBed } from '@angular/core/testing';
-import { MockComponent } from 'src/core/src/lib/test-utils';
+import { FormlyFieldConfig, FormlyTemplateOptions, FormlyModule, FieldArrayType } from '@ngx-formly/core';
+import { FormControl, FormGroup, FormArray, ReactiveFormsModule } from '@angular/forms';
+import { TestBed } from '@angular/core/testing';
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'formly-test-component',
+  template: '<formly-form [fields]="fields" [model]="model"></formly-form>',
+})
+class TestComponent { }
+
+function renderComponent({ schema, model }: { schema: JSONSchema7, model?: any }) {
+  TestBed.configureTestingModule({
+    declarations: [TestComponent, ArrayTypeComponent],
+    imports: [
+      ReactiveFormsModule,
+      FormlyModule.forRoot({
+        types: [
+          { name: 'object', component: TestComponent },
+          { name: 'array', component: ArrayTypeComponent },
+          { name: 'multischema', component: TestComponent },
+          { name: 'enum', component: TestComponent },
+          { name: 'string', component: TestComponent },
+        ],
+      }),
+    ],
+  });
+
+  const fixture = TestBed.createComponent(TestComponent);
+
+  model = model || {};
+  const field = (new FormlyJsonschema()).toFieldConfig(schema);
+  fixture.componentInstance['fields'] = [field];
+  fixture.componentInstance['model'] = model;
+  fixture.componentInstance['form'] = Array.isArray(model) ? new FormArray([]) : new FormGroup({});
+  fixture.detectChanges();
+
+  return { fixture, field, model };
+}
 
 describe('Service: FormlyJsonschema', () => {
   let formlyJsonschema: FormlyJsonschema;
@@ -96,6 +131,23 @@ describe('Service: FormlyJsonschema', () => {
         expect(multipleOfValidator).toBeDefined();
         expect(multipleOfValidator(new FormControl(9))).toBeFalsy();
         expect(multipleOfValidator(new FormControl(10))).toBeTruthy();
+      });
+
+      it('should support passing float multipleOf', () => {
+        const numSchema: JSONSchema7 = {
+          type: 'number',
+          multipleOf: 0.15,
+        };
+        const config = formlyJsonschema.toFieldConfig(numSchema);
+        expect(config.templateOptions.step).toBe(numSchema.multipleOf);
+
+        const multipleOfValidator = config.validators.multipleOf;
+        expect(multipleOfValidator).toBeDefined();
+        expect(multipleOfValidator(new FormControl(0))).toBeTruthy();
+        expect(multipleOfValidator(new FormControl(1))).toBeFalsy();
+        expect(multipleOfValidator(new FormControl(10))).toBeFalsy();
+        expect(multipleOfValidator(new FormControl(15))).toBeTruthy();
+        expect(multipleOfValidator(new FormControl(150))).toBeTruthy();
       });
     });
 
@@ -275,96 +327,90 @@ describe('Service: FormlyJsonschema', () => {
     // TODO: complete support for Object validation keywords
     // https://json-schema.org/latest/json-schema-validation.html#rfc.section.6.5
     describe('object validation keywords', () => {
-      it('supports properties and required keywords as well as nested objects', () => {
-        const schema: JSONSchema7 = {
-          type: 'object',
-          required: ['requiredField'],
-          properties: {
-            requiredField: { type: 'string' },
-            notRequired: { type: 'number' },
-            nested: {
+      describe('required keyword', () => {
+        it('root object with required property', () => {
+          const {field} = renderComponent({
+            schema: {
               type: 'object',
+              required: ['name'],
               properties: {
-                nestedProp: { type: 'string' },
+                name: { type: 'string' },
               },
             },
-          },
-        };
+          });
 
-        const config = formlyJsonschema.toFieldConfig(schema);
+          const childField = field.fieldGroup[0];
+          expect(childField.templateOptions.required).toBeTruthy();
+        });
 
-        const child1: FormlyFieldConfig = {
-          type: 'string',
-          key: 'requiredField',
-          templateOptions: { ...emmptyTemplateOptions, required: true },
-          defaultValue: undefined,
-        };
+        it('nested required object with required property', () => {
+          const { field } = renderComponent({
+            schema: {
+              type: 'object',
+              required: ['address'],
+              properties: {
+                address: {
+                  type: 'object',
+                  required: ['city'],
+                  properties: {
+                    city: { type: 'string' },
+                  },
+                },
+              },
+            },
+          });
 
-        const child2: FormlyFieldConfig = {
-          type: 'number',
-          key: 'notRequired',
-          templateOptions: { ...emmptyTemplateOptions },
-          defaultValue: undefined,
-          parsers: [jasmine.any(Function)],
-        };
+          const childField = field.fieldGroup[0].fieldGroup[0];
+          expect(childField.templateOptions.required).toBeTruthy();
+        });
 
-        const nestedProp: FormlyFieldConfig = {
-          type: 'string',
-          key: 'nestedProp',
-          templateOptions: { ...emmptyTemplateOptions },
-          defaultValue: undefined,
-        };
+        it('nested optional object with required property', () => {
+          const { field, fixture } = renderComponent({
+            schema: {
+              type: 'object',
+              properties: {
+                address: {
+                  type: 'object',
+                  required: ['city'],
+                  properties: {
+                    city: { type: 'string' },
+                  },
+                },
+              },
+            },
+          });
 
-        const nested: FormlyFieldConfig = {
-          type: 'object',
-          key: 'nested',
-          templateOptions: {...emmptyTemplateOptions },
-          defaultValue: undefined,
-          fieldGroup: [nestedProp],
-        };
+          const childField = field.fieldGroup[0].fieldGroup[0];
+          expect(childField.templateOptions.required).toBeFalsy();
 
-        expect(config.fieldGroup[0]).toEqual(child1);
-        expect(config.fieldGroup[1]).toEqual(child2);
-        expect(config.fieldGroup[2]).toEqual(nested);
+          childField.formControl.setValue('');
+          fixture.detectChanges();
+          expect(childField.templateOptions.required).toBeTruthy();
+        });
       });
 
       describe('dependencies', () => {
         describe('with property dependencies', () => {
-          it('should ignore required properties if required is defined', () => {
-            const schema: JSONSchema7 = {
-              'type': 'object',
-              'properties': {
-                'credit_card': { 'type': 'number' },
-                'billing_address': { 'type': 'string' },
-              },
-              'required': ['credit_card'],
-              'dependencies': {
-                'credit_card': ['billing_address'],
-              },
-            };
-
-            const config = formlyJsonschema.toFieldConfig(schema).fieldGroup;
-
-            expect(config[0].templateOptions.required).toBeTruthy();
-            expect(config[0].expressionProperties).toBeUndefined();
-          });
-
           it('should add required properties', () => {
-            const schema: JSONSchema7 = {
-              'type': 'object',
-              'properties': {
-                'credit_card': { 'type': 'number' },
-                'billing_address': { 'type': 'string' },
-              },
-              'dependencies': {
-                'credit_card': ['billing_address'],
-              },
-            };
+            const { field, fixture } = renderComponent({
+              model: { credit_card: 121223233 },
+              schema: {
+                'type': 'object',
+                'properties': {
+                  'credit_card': { 'type': 'string' },
+                  'billing_address': { 'type': 'string' },
+                },
+                'dependencies': {
+                  'credit_card': ['billing_address'],
+                },
+              } });
 
-            const config = formlyJsonschema.toFieldConfig(schema).fieldGroup;
-            const requiredExpr = config[1].expressionProperties['templateOptions.required'] as any;
-            expect(requiredExpr({ credit_card: null })).toBeFalsy();
-            expect(requiredExpr({ credit_card: 121223233 })).toBeTruthy();
+            const [creditCardField, billingAddressField] = field.fieldGroup;
+            expect(billingAddressField.templateOptions.required).toBeTruthy();
+
+            creditCardField.formControl.setValue(null);
+            fixture.detectChanges();
+            expect(billingAddressField.templateOptions.required).toBeFalsy();
           });
         });
 
@@ -482,13 +528,13 @@ describe('Service: FormlyJsonschema', () => {
           it('should support enum as oneOf/const structure', () => {
             const schema: JSONSchema7 = {
               type: 'number',
-              oneOf: [{ title: '1', const: 1 }, { title: '2', const: 2 }],
+              oneOf: [{ title: '1', const: 1 }, { title: '2', const: 2, readOnly: true }],
             };
 
             const { type, templateOptions: { options } } = formlyJsonschema.toFieldConfig(schema);
 
             expect(type).toEqual('enum');
-            expect(options).toEqual([{ label: '1', value: 1 }, { label: '2', value: 2 }]);
+            expect(options).toEqual([{ label: '1', value: 1 }, { label: '2', value: 2, disabled: true }]);
           });
 
           it('should support enum as oneOf/enum structure', () => {
@@ -687,33 +733,36 @@ describe('Service: FormlyJsonschema', () => {
     // https://json-schema.org/latest/json-schema-validation.html#rfc.section.6.7
     describe('Schema allOf support', () => {
       it('should merge allOf array into single object', () => {
-        const schema: JSONSchema7 = {
-          'definitions': {
-            'address': {
-              'type': 'object',
-              'properties': {
-                'street_address': { 'type': 'string' },
-                'city':           { 'type': 'string' },
-                'state':          { 'type': 'string' },
-              },
-              'required': ['street_address', 'city', 'state'],
-            },
-          },
-          'type': 'object',
-          'properties': {
-            'billing_address': {
-              allOf: [
-                {'$ref': '#/definitions/address'},
-                { 'properties': {
-                    'type': { 'enum': [ 'residential', 'business' ] },
-                  },
+        const { field } = renderComponent({
+          schema: {
+            'definitions': {
+              'address': {
+                'type': 'object',
+                'properties': {
+                  'street_address': { 'type': 'string' },
+                  'city': { 'type': 'string' },
+                  'state': { 'type': 'string' },
                 },
-              ],
+                'required': ['street_address', 'city', 'state'],
+              },
+            },
+            'type': 'object',
+            'required': ['billing_address'],
+            'properties': {
+              'billing_address': {
+                allOf: [
+                  { '$ref': '#/definitions/address' },
+                  {
+                    'properties': {
+                      'type': { 'enum': ['residential', 'business'] },
+                    },
+                  },
+                ],
+              },
             },
           },
-        };
-        const { fieldGroup } = formlyJsonschema.toFieldConfig(schema);
-        const expected = fieldGroup[0].fieldGroup.map(({key, type, templateOptions: { required } }) => ({ key, type, required }));
+        });
+        const expected = field.fieldGroup[0].fieldGroup.map(({key, type, templateOptions: { required } }) => ({ key, type, required }));
         expect(expected).toEqual([
           { key: 'street_address', type: 'string', required: true },
           { key: 'city', type: 'string', required: true },
@@ -723,42 +772,44 @@ describe('Service: FormlyJsonschema', () => {
       });
 
       it('should handle nested allOf', () => {
-        const schema: JSONSchema7 = {
-          'definitions': {
-            'baseAddress': {
-              'type': 'object',
-              'properties': {
-                'street_address': { 'type': 'string' },
-                'city':           { 'type': 'string' },
-                'state':          { 'type': 'string' },
+        const { field } = renderComponent({
+          schema: {
+            'definitions': {
+              'baseAddress': {
+                'type': 'object',
+                'properties': {
+                  'street_address': { 'type': 'string' },
+                  'city':           { 'type': 'string' },
+                  'state':          { 'type': 'string' },
+                },
+                'required': ['street_address', 'city', 'state'],
               },
-              'required': ['street_address', 'city', 'state'],
-            },
-            'mailingAddress': {
-              allOf: [
-                {'$ref': '#/definitions/baseAddress'},
-                { 'properties': {
-                    'country': { 'type': 'string' },
+              'mailingAddress': {
+                allOf: [
+                  {'$ref': '#/definitions/baseAddress'},
+                  { 'properties': {
+                      'country': { 'type': 'string' },
+                    },
                   },
-                },
-              ],
+                ],
+              },
+            },
+            'type': 'object',
+            'required': ['billing_address'],
+            'properties': {
+              'billing_address': {
+                allOf: [
+                  {'$ref': '#/definitions/mailingAddress'},
+                  { 'properties': {
+                      'type': { 'enum': [ 'residential', 'business' ] },
+                    },
+                  },
+                ],
+              },
             },
           },
-          'type': 'object',
-          'properties': {
-            'billing_address': {
-              allOf: [
-                {'$ref': '#/definitions/mailingAddress'},
-                { 'properties': {
-                    'type': { 'enum': [ 'residential', 'business' ] },
-                  },
-                },
-              ],
-            },
-          },
-        };
-        const { fieldGroup } = formlyJsonschema.toFieldConfig(schema);
-        const expected = fieldGroup[0].fieldGroup.map(({key, type, templateOptions: { required } }) => ({ key, type, required }));
+        });
+        const expected = field.fieldGroup[0].fieldGroup.map(({key, type, templateOptions: { required } }) => ({ key, type, required }));
         expect(expected).toEqual([
           { key: 'street_address', type: 'string', required: true },
           { key: 'city', type: 'string', required: true },
@@ -782,7 +833,7 @@ describe('Service: FormlyJsonschema', () => {
           ],
         };
         const { fieldGroup } = formlyJsonschema.toFieldConfig(schema);
-        const expected = fieldGroup.map(({key, templateOptions: { required } }) => ({ key, required }));
+        const expected = fieldGroup.map(({ key, expressionProperties }) => ({ key, required: !!expressionProperties['templateOptions.required'] }));
         expect(expected).toEqual([
           { key: 'firstname', required: true },
           { key: 'lastname', required: true },
@@ -790,22 +841,23 @@ describe('Service: FormlyJsonschema', () => {
       });
 
       it('should merge allOf with base schema', () => {
-        const schema: JSONSchema7 = {
-          'properties': { 'firstname': {'type': 'string'} },
-          'required': ['firstname'],
-          'allOf': [
-            {
-              'properties': { 'familyname': {'type': 'string'} },
-              'required': ['familyname'],
-            },
-            {
-              'properties': { 'lastname': {'type': 'string'} },
-              'required': ['lastname'],
-            },
-          ],
-        };
-        const { fieldGroup } = formlyJsonschema.toFieldConfig(schema);
-        const expected = fieldGroup.map(({key, templateOptions: { required } }) => ({ key, required }));
+        const { field } = renderComponent({
+          schema: {
+            'properties': { 'firstname': { 'type': 'string' } },
+            'required': ['firstname'],
+            'allOf': [
+              {
+                'properties': { 'familyname': { 'type': 'string' } },
+                'required': ['familyname'],
+              },
+              {
+                'properties': { 'lastname': { 'type': 'string' } },
+                'required': ['lastname'],
+              },
+            ],
+          },
+        });
+        const expected = field.fieldGroup.map(({key, templateOptions: { required } }) => ({ key, required }));
         expect(expected).toEqual([
           { key: 'firstname', required: true },
           { key: 'familyname', required: true },
@@ -854,28 +906,6 @@ describe('Service: FormlyJsonschema', () => {
 
     describe('Multi-Schema (oneOf, anyOf) support', () => {
       let schema: JSONSchema7;
-      let builder: FormlyFormBuilder;
-
-      beforeEach(() => {
-        const TestComponent = MockComponent({ selector: 'formly-test-cmp' });
-        TestBed.configureTestingModule({
-          declarations: [TestComponent],
-          imports: [
-            FormlyModule.forRoot({
-              types: [
-                { name: 'object', component: TestComponent },
-                { name: 'multischema', component: TestComponent },
-                { name: 'enum', component: TestComponent },
-                { name: 'string', component: TestComponent },
-              ],
-            }),
-          ],
-        });
-      });
-
-      beforeEach(inject([FormlyFormBuilder], (formlyBuilder: FormlyFormBuilder) => {
-        builder = formlyBuilder;
-      }));
 
       describe('oneOf', () => {
         beforeEach(() => {
@@ -897,50 +927,148 @@ describe('Service: FormlyJsonschema', () => {
         });
 
         it('should render the valid oneOf field on first render', () => {
-          const { fieldGroup: [f] } = formlyJsonschema.toFieldConfig(schema);
-
-          builder.buildForm(new FormGroup({}), [f], {}, {});
-          const [, { fieldGroup: [fooField, barField] }] = f.fieldGroup;
+          const { field } = renderComponent({ schema });
+          const [, { fieldGroup: [fooField, barField] }] = field.fieldGroup[0].fieldGroup;
 
           expect(fooField.hide).toBeTruthy();
           expect(barField.hide).toBeFalsy();
         });
 
+        it('should render the valid oneOf field when properties have the same name', () => {
+          const { field } = renderComponent({
+            model: { foo: 2 },
+            schema: {
+              type: 'object',
+              oneOf: [
+                { properties: { foo: { const: 1 } }, title: 'foo1' },
+                { properties: { foo: { const: 2 } }, title: 'foo2' },
+              ],
+            },
+          });
+          const [, { fieldGroup: [foo1Field, foo2Field] }] = field.fieldGroup[0].fieldGroup;
+
+          expect(foo1Field.hide).toBeTruthy();
+          expect(foo2Field.hide).toBeFalsy();
+        });
+
+        it('should not share the same formControl when a prop is duplicated in oneOf', () => {
+          const { field, model } = renderComponent({
+            model: { foo: 2 },
+            schema: {
+              type: 'object',
+              oneOf: [
+                { properties: { foo: { const: 1 } } },
+                { properties: { foo: { type: 'object' } } },
+              ],
+            },
+          });
+
+          const [, { fieldGroup: [foo1Field, foo2Field] }] = field.fieldGroup[0].fieldGroup;
+
+          expect(foo1Field.fieldGroup[0].formControl).not.toEqual(foo2Field.fieldGroup[0].formControl);
+          expect(model).toEqual({ foo: 2 });
+        });
+
         it('should render the selected oneOf field', () => {
-          const { fieldGroup: [f] } = formlyJsonschema.toFieldConfig(schema);
-          const model: any = { foo: 'test' };
-          builder.buildForm(new FormGroup({}), [f], model, {});
-          const [enumField, { fieldGroup: [fooField, barField] }] = f.fieldGroup;
+          const { field, model, fixture } = renderComponent({
+            model: { foo: 'test' },
+            schema,
+          });
+
+          const [enumField, { fieldGroup: [fooField, barField] }] = field.fieldGroup[0].fieldGroup;
 
           expect(fooField.hide).toBeFalsy();
           expect(barField.hide).toBeTruthy();
 
           enumField.formControl.setValue(1);
-          (f.options as any)._checkField(f.parent);
+          fixture.detectChanges();
 
           expect(model).toEqual({});
           expect(fooField.hide).toBeTruthy();
           expect(barField.hide).toBeFalsy();
         });
 
-        it('should take account of default value', () => {
-          const { fieldGroup: [f] } = formlyJsonschema.toFieldConfig({
-            type: 'object',
-            oneOf: [
-              { properties: { foo: { type: 'string', default: 'foo' } } },
-              { properties: { bar: { type: 'string', default: 'bar' } } },
-            ],
+        it('should support oneOf within array', () => {
+          const { field } = renderComponent({
+            model: [{ foo: 2 }],
+            schema: {
+              type: 'array',
+              items: {
+                type: 'object',
+                oneOf: [
+                  { properties: { foo: { const: 1 } } },
+                  { properties: { foo: { const: 2 } } },
+                ],
+              },
+            },
           });
-          const model: any = {};
-          builder.buildForm(new FormGroup({}), [f], model, {});
-          const [enumField, { fieldGroup: [fooField, barField] }] = f.fieldGroup;
+
+          const [, { fieldGroup: [foo1Field, foo2Field] }] = field.fieldGroup[0].fieldGroup[0].fieldGroup;
+
+          expect(foo1Field.hide).toBeTruthy();
+          expect(foo2Field.hide).toBeFalsy();
+        });
+
+        it('should support nested oneOf', () => {
+          const { field, model } = renderComponent({
+            model: { foo: 2 },
+            schema: {
+              type: 'object',
+              oneOf: [
+                {
+                  type: 'object',
+                  oneOf: [
+                    { properties: { foo: { const: 1 } } },
+                    { properties: { foo: { const: 2 } } },
+                  ],
+                },
+                { properties: { foo: { const: 3 } } },
+              ],
+            },
+          });
+
+          const [, { fieldGroup: [foo1Field, foo2Field] }] = field.fieldGroup[0].fieldGroup;
+
+          expect(foo1Field.hide).toBeFalsy();
+          expect(foo2Field.hide).toBeTruthy();
+          expect(model).toEqual({ foo: 2 });
+        });
+
+        it('should not take account of default value for the selected oneOf', () => {
+          const { field } = renderComponent({
+            schema: {
+              type: 'object',
+              oneOf: [
+                { properties: { foo: { type: 'string' } }, required: ['foo'] },
+                { properties: { bar: { type: 'string', default: 'bar' } }, required: ['bar'] },
+              ],
+            },
+          });
+
+          const [, { fieldGroup: [fooField, barField] }] = field.fieldGroup[0].fieldGroup;
+
+          expect(fooField.hide).toBeFalsy();
+          expect(barField.hide).toBeTruthy();
+        });
+
+        it('should take account of default value', () => {
+          const { field, model, fixture } = renderComponent({
+            schema: {
+              type: 'object',
+              oneOf: [
+                { properties: { foo: { type: 'string', default: 'foo' } } },
+                { properties: { bar: { type: 'string', default: 'bar' } } },
+              ],
+            },
+          });
+          const [enumField, { fieldGroup: [fooField, barField] }] = field.fieldGroup[0].fieldGroup;
 
           expect(fooField.hide).toBeFalsy();
           expect(barField.hide).toBeTruthy();
           expect(model).toEqual({ foo: 'foo' });
 
           enumField.formControl.setValue(1);
-          (f.options as any)._checkField(f.parent);
+          fixture.detectChanges();
 
           expect(fooField.hide).toBeTruthy();
           expect(barField.hide).toBeFalsy();
@@ -948,49 +1076,94 @@ describe('Service: FormlyJsonschema', () => {
         });
 
         it('should set default value on change', () => {
-          const { fieldGroup: [f] } = formlyJsonschema.toFieldConfig({
-            type: 'object',
-            oneOf: [
-              { properties: { foo: { type: 'string', default: 'foo' } } },
-              { properties: { bar: { type: 'string', default: 'bar' } } },
-            ],
+          const { field, model, fixture } = renderComponent({
+            model: { bar: 'test' },
+            schema: {
+              type: 'object',
+              oneOf: [
+                { properties: { foo: { type: 'string', default: 'foo' } } },
+                { properties: { bar: { type: 'string', default: 'bar' } } },
+              ],
+            },
           });
-          const model: any = { bar: 'test' };
-          builder.buildForm(new FormGroup({}), [f], model, { _initialModel: { bar: 'test' } } as any);
-          const [enumField, { fieldGroup: [fooField, barField] }] = f.fieldGroup;
+          const [enumField, { fieldGroup: [fooField, barField] }] = field.fieldGroup[0].fieldGroup;
 
           expect(fooField.hide).toBeTruthy();
           expect(barField.hide).toBeFalsy();
           expect(model).toEqual({ bar: 'test' });
 
           enumField.formControl.setValue(0);
-          (f.options as any)._checkField(f.parent);
+          fixture.detectChanges();
           expect(model).toEqual({ foo: 'foo' });
 
           enumField.formControl.setValue(1);
-          (f.options as any)._checkField(f.parent);
+          fixture.detectChanges();
           expect(model).toEqual({ bar: 'bar' });
         });
 
         it('should render the selected oneOf field (with more matched fields)', () => {
-          const { fieldGroup: [f] } = formlyJsonschema.toFieldConfig({
-            type: 'object',
-            oneOf: [
-              { properties: { foo1: { type: 'string' } } },
-              {
-                properties: {
-                  foo1: { type: 'string' },
-                  bar: { type: 'string' },
+          const { field } = renderComponent({
+            model: { foo1: 'test', bar: 'test' },
+            schema: {
+              type: 'object',
+              oneOf: [
+                { properties: { foo1: { type: 'string' } } },
+                {
+                  properties: {
+                    foo1: { type: 'string' },
+                    bar: { type: 'string' },
+                  },
                 },
-              },
-            ],
+              ],
+            },
           });
-          const model: any = { foo1: 'test', bar: 'test' };
-          builder.buildForm(new FormGroup({}), [f], model, { _initialModel: { foo1: 'test', bar: 'test' } } as any);
-          const [, { fieldGroup: [f1, f2] }] = f.fieldGroup;
+          const [, { fieldGroup: [f1, f2] }] = field.fieldGroup[0].fieldGroup;
 
           expect(f1.hide).toBeTruthy();
           expect(f2.hide).toBeFalsy();
+        });
+
+        it('should not select oneOf readOnly option', () => {
+          const { field } = renderComponent({
+            schema: {
+              type: 'object',
+              anyOf: [
+                {
+                  properties: { foo: { type: 'string' } },
+                  readOnly: true,
+                },
+                { properties: { bar: { type: 'string' } } },
+              ],
+            },
+          });
+
+          const [, { fieldGroup: [f1, f2] }] = field.fieldGroup[0].fieldGroup;
+
+          expect(f1.templateOptions.disabled).toBeTruthy();
+          expect(f1.hide).toBeTruthy();
+          expect(f2.hide).toBeFalsy();
+        });
+
+        it('should select oneOf readOnly option when model is set', () => {
+          const { field } = renderComponent({
+            model: { foo: 'test' },
+            schema: {
+              type: 'object',
+              anyOf: [
+                {
+                  properties: { foo: { type: 'string' } },
+                  readOnly: true,
+                },
+                { properties: { bar: { type: 'string' } } },
+              ],
+            },
+          });
+
+          const [, { fieldGroup: [f1, f2] }] = field.fieldGroup[0].fieldGroup;
+
+          expect(f1.templateOptions.disabled).toBeTruthy();
+          expect(f1.hide).toBeFalsy();
+          expect(f2.hide).toBeTruthy();
         });
       });
 
@@ -1014,88 +1187,102 @@ describe('Service: FormlyJsonschema', () => {
         });
 
         it('should render the valid anyOf field on first render', () => {
-          const { fieldGroup: [f] } = formlyJsonschema.toFieldConfig(schema);
-
-          builder.buildForm(new FormGroup({}), [f], {}, {});
-          const [, { fieldGroup: [fooField, barField] }] = f.fieldGroup;
+          const { field } = renderComponent({ schema });
+          const [, { fieldGroup: [fooField, barField] }] = field.fieldGroup[0].fieldGroup;
 
           expect(fooField.hide).toBeTruthy();
           expect(barField.hide).toBeFalsy();
         });
 
-        it('should render the filled anyOf field on first render', () => {
-          const { fieldGroup: [f] } = formlyJsonschema.toFieldConfig({
-            type: 'object',
-            anyOf: [
-              { properties: { foo: { type: 'string', default: 'foo' } } },
-              { properties: { bar: { type: 'string' } } },
-            ],
+        it('should render the filled anyOf field on first render (matched one anyOf schema)', () => {
+          const { field } = renderComponent({
+            model: { bar: 'bar' },
+            schema: {
+              type: 'object',
+              anyOf: [
+                { properties: { foo: { type: 'string', default: 'foo' } } },
+                { properties: { bar: { type: 'string' } } },
+              ],
+            },
           });
 
-          builder.buildForm(new FormGroup({}), [f], {}, { _initialModel: { bar: 'bar' } } as any);
-          const [, { fieldGroup: [fooField, barField] }] = f.fieldGroup;
+          const [, { fieldGroup: [fooField, barField] }] = field.fieldGroup[0].fieldGroup;
 
           expect(fooField.hide).toBeTruthy();
+          expect(barField.hide).toBeFalsy();
+        });
+
+        it('should render the filled anyOf field on first render (matched multi anyOf schema)', () => {
+          const { field } = renderComponent({
+            model: { bar: 'bar', foo: 'test' },
+            schema: {
+              type: 'object',
+              anyOf: [
+                { properties: { foo: { type: 'string', default: 'foo' } } },
+                { properties: { bar: { type: 'string' } } },
+              ],
+            },
+          });
+
+          const [, { fieldGroup: [fooField, barField] }] = field.fieldGroup[0].fieldGroup;
+
+          expect(fooField.hide).toBeFalsy();
           expect(barField.hide).toBeFalsy();
         });
 
         it('should render the selected anyOf field', () => {
-          const { fieldGroup: [f] } = formlyJsonschema.toFieldConfig(schema);
-          const model: any = { foo: 'test' };
-          builder.buildForm(new FormGroup({}), [f], model, {});
-          const [enumField, { fieldGroup: [fooField, barField] }] = f.fieldGroup;
+          const { field, model, fixture } = renderComponent({ schema, model: { foo: 'test' } });
+          const [enumField, { fieldGroup: [fooField, barField] }] = field.fieldGroup[0].fieldGroup;
 
           expect(fooField.hide).toBeFalsy();
           expect(barField.hide).toBeTruthy();
 
           enumField.formControl.setValue([1]);
-          (f.options as any)._checkField(f.parent);
+          fixture.detectChanges();
 
           expect(model).toEqual({});
           expect(fooField.hide).toBeTruthy();
           expect(barField.hide).toBeFalsy();
         });
 
-        it('should reset the unselected anyOf field using default value', () => {
-          const { fieldGroup: [f] } = formlyJsonschema.toFieldConfig({
-            type: 'object',
-            anyOf: [
-              { properties: { foo: { type: 'string', default: 'foo' } } },
-              { properties: { bar: { type: 'string', default: 'bar' } } },
-            ],
+        it('should reset the unselected anyOf field with default value', () => {
+          const { field, model, fixture } = renderComponent({
+            schema: {
+              type: 'object',
+              anyOf: [
+                { properties: { foo: { type: 'string', default: 'foo' } } },
+                { properties: { bar: { type: 'string', default: 'bar' } } },
+              ],
+            },
           });
 
-          const form = new FormGroup({});
-          builder.buildForm(form, [f], {}, {});
+          expect(model).toEqual({ foo: 'foo' });
 
-          expect(form.value).toEqual({ foo: 'foo' });
-
-          const [enumField] = f.fieldGroup;
+          const [enumField] = field.fieldGroup[0].fieldGroup;
           enumField.formControl.setValue([1]);
-          (f.options as any)._checkField(f.parent);
+          fixture.detectChanges();
 
-          expect(form.value).toEqual({ bar: 'bar' });
+          expect(model).toEqual({ bar: 'bar' });
         });
 
         it('should reset the unselected anyOf field (same key)', () => {
-          const { fieldGroup: [f] } = formlyJsonschema.toFieldConfig({
-            type: 'object',
-            anyOf: [
-              { properties: { foo: { type: 'string', default: 'foo' } } },
-              { properties: { foo: { type: 'string', default: 'bar' } } },
-            ],
+          const { field, model, fixture } = renderComponent({
+            schema: {
+              type: 'object',
+              anyOf: [
+                { properties: { foo: { type: 'string', default: 'foo' } } },
+                { properties: { foo: { type: 'string', default: 'bar' } } },
+              ],
+            },
           });
 
-          const form = new FormGroup({});
-          builder.buildForm(form, [f], {}, {});
+          expect(model).toEqual({ foo: 'foo' });
 
-          expect(form.value).toEqual({ foo: 'foo' });
-
-          const [enumField] = f.fieldGroup;
+          const [enumField] = field.fieldGroup[0].fieldGroup;
           enumField.formControl.setValue([1]);
-          (f.options as any)._checkField(f.parent);
+          fixture.detectChanges();
 
-          expect(form.value).toEqual({ foo: 'bar' });
+          expect(model).toEqual({ foo: 'bar' });
         });
       });
     });
@@ -1117,6 +1304,7 @@ describe('Service: FormlyJsonschema', () => {
         expect(defaultValue).toBe(schema.default);
         expect(to.description).toBe(schema.description);
         expect(to.readonly).toBe(schema.readOnly);
+        expect(to.disabled).toBe(schema.readOnly);
       });
     });
   });
@@ -1154,6 +1342,66 @@ describe('Service: FormlyJsonschema', () => {
       const { templateOptions: to } = formlyJsonschema.toFieldConfig(schema);
 
       expect(to.label).toBe('Age');
+    });
+    it('should be possible to set the key via formlyConfig', () => {
+      const schema: JSONSchema7 = JSON.parse(`{
+        "title": "Custom model Key",
+        "type": "object",
+        "properties": {
+          "withkey": {
+            "type": "string",
+            "title": "With Key",
+            "widget": {
+              "formlyConfig": {
+                "key": "custom.key.path"
+              }
+            }
+          },
+          "withNumericKey": {
+            "type": "string",
+            "title": "With Key",
+            "widget": {
+              "formlyConfig": {
+                "key": 0
+              }
+            }
+          },
+          "withArrayKey": {
+            "type": "string",
+            "title": "With Key",
+            "widget": {
+              "formlyConfig": {
+                "key": []
+              }
+            }
+          },
+          "withoutKey": {
+            "type": "string",
+            "title": "Without key"
+          },
+          "alsoWithoutKey": {
+            "type": "string",
+            "title": "Also without key",
+            "widget": {
+              "formlyConfig": {
+                "templateOptions": {
+                  "type": "date"
+                }
+              }
+            }
+          }
+        }
+      }`);
+      const fields = formlyJsonschema.toFieldConfig(schema);
+      expect(fields.fieldGroup).toBeDefined();
+      const fg = fields.fieldGroup;
+      expect(fg.length).toEqual(5);
+      expect(fg[0].key).toEqual('custom.key.path');
+      expect(fg[1].key).toEqual(0);
+      expect(fg[2].key).toEqual([]);
+      // Check the falsy path also
+      expect(fg[3].key).toEqual('withoutKey');
+      expect(fg[4].key).toEqual('alsoWithoutKey');
     });
   });
 
@@ -1220,3 +1468,15 @@ describe('Service: FormlyJsonschema', () => {
     });
   });
 });
+
+@Component({
+  selector: 'formly-array-type',
+  template: `
+    <div *ngFor="let field of field.fieldGroup; let i = index;">
+      <formly-group [field]="field"></formly-group>
+      <button [id]="'remove-' + i" type="button" (click)="remove(i)">Remove</button>
+    </div>
+    <button id="add" type="button" (click)="add()">Add</button>
+  `,
+})
+class ArrayTypeComponent extends FieldArrayType { }

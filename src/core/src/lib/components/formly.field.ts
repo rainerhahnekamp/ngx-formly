@@ -9,6 +9,7 @@ import { FormlyFieldConfig, FormlyFormOptions, FormlyFieldConfigCache } from './
 import { defineHiddenProp, wrapProperty } from '../utils';
 import { FieldWrapper } from '../templates/field.wrapper';
 import { FieldType } from '../templates/field.type';
+import { isObservable } from 'rxjs';
 
 @Component({
   selector: 'formly-field',
@@ -36,6 +37,7 @@ export class FormlyField implements OnInit, OnChanges, DoCheck, AfterContentInit
   @ViewChild('container', <any> {read: ViewContainerRef, static: true }) containerRef: ViewContainerRef;
   private hostObservers: Function[] = [];
   private componentRefs: any[] = [];
+  private hooksObservers: Function[] = [];
 
   constructor(
     private formlyConfig: FormlyConfig,
@@ -79,13 +81,15 @@ export class FormlyField implements OnInit, OnChanges, DoCheck, AfterContentInit
   ngOnDestroy() {
     this.resetRefs(this.field);
     this.hostObservers.forEach(unsubscribe => unsubscribe());
+    this.hooksObservers.forEach(unsubscribe => unsubscribe());
     this.triggerHook('onDestroy');
   }
 
-  private renderField(containerRef: ViewContainerRef, f: FormlyFieldConfigCache, wrappers: string[]) {
+  private renderField(containerRef: ViewContainerRef, f: FormlyFieldConfigCache, wrappers: string[] = []) {
     if (this.containerRef === containerRef) {
       this.resetRefs(this.field);
       this.containerRef.clear();
+      wrappers = this.field ? this.field.wrappers : [];
     }
 
     if (wrappers && wrappers.length > 0) {
@@ -116,7 +120,11 @@ export class FormlyField implements OnInit, OnChanges, DoCheck, AfterContentInit
   private triggerHook(name: string, changes?: SimpleChanges) {
     if (this.field && this.field.hooks && this.field.hooks[name]) {
       if (!changes || changes.field) {
-        this.field.hooks[name](this.field);
+        const r = this.field.hooks[name](this.field);
+        if (isObservable(r) && ['onInit', 'afterContentInit', 'afterViewInit'].indexOf(name) !== -1) {
+          const sub = r.subscribe();
+          this.hooksObservers.push(() => sub.unsubscribe());
+        }
       }
     }
 
@@ -130,9 +138,8 @@ export class FormlyField implements OnInit, OnChanges, DoCheck, AfterContentInit
     }
 
     if (name === 'onChanges' && changes.field) {
-      this.renderHostBinding();
       this.resetRefs(changes.field.previousValue);
-      this.renderField(this.containerRef, this.field, this.field ? this.field.wrappers : []);
+      this.render();
     }
   }
 
@@ -142,7 +149,7 @@ export class FormlyField implements OnInit, OnChanges, DoCheck, AfterContentInit
     Object.assign(ref.instance, { field });
   }
 
-  private renderHostBinding() {
+  private render() {
     if (!this.field) {
       return;
     }
@@ -150,8 +157,17 @@ export class FormlyField implements OnInit, OnChanges, DoCheck, AfterContentInit
     this.hostObservers.forEach(unsubscribe => unsubscribe());
     this.hostObservers = [
       wrapProperty(this.field, 'hide', ({ firstChange, currentValue }) => {
-        if (!firstChange || (firstChange && currentValue)) {
-          this.renderer.setStyle(this.elementRef.nativeElement, 'display', currentValue ? 'none' : '');
+        if (!this.formlyConfig.extras.lazyRender) {
+          firstChange && this.renderField(this.containerRef, this.field);
+          if (!firstChange || (firstChange && currentValue)) {
+            this.renderer.setStyle(this.elementRef.nativeElement, 'display', currentValue ? 'none' : '');
+          }
+        } else {
+          if (currentValue) {
+            this.containerRef.clear();
+          } else {
+            this.renderField(this.containerRef, this.field);
+          }
         }
       }),
       wrapProperty(this.field, 'className', ({ firstChange, currentValue }) => {

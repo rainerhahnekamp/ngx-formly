@@ -1,7 +1,7 @@
 import { FormlyExtension, FormlyConfig, TemplateManipulators } from '../../services/formly.config';
 import { FormlyFieldConfigCache, FormlyFieldConfig } from '../../components/formly.field.config';
 import { FormGroup } from '@angular/forms';
-import { getFieldId, assignModelValue, isUndefined, getFieldValue, reverseDeepMerge, getKeyPath } from '../../utils';
+import { getFieldId, isUndefined, getFieldValue, reverseDeepMerge, assignFieldValue } from '../../utils';
 
 /** @experimental */
 export class CoreExtension implements FormlyExtension {
@@ -67,6 +67,10 @@ export class CoreExtension implements FormlyExtension {
       },
     });
 
+    if (this.formlyConfig.extras.resetFieldOnHide && field.resetOnHide !== false) {
+      field.resetOnHide = true;
+    }
+
     if (field.lifecycle) {
       console.warn(`NgxFormly: 'lifecycle' is deprecated since v5.0, use 'hooks' instead.`);
     }
@@ -92,8 +96,22 @@ export class CoreExtension implements FormlyExtension {
       this.formlyConfig.getMergedField(field);
     }
 
-    if (!field['autoClear'] && !isUndefined(field.defaultValue) && isUndefined(getFieldValue(field))) {
-      assignModelValue(root.model, getKeyPath(field), field.defaultValue);
+    if (field.parent) {
+      let setDefaultValue = !isUndefined(field.key)
+        && !isUndefined(field.defaultValue)
+        && isUndefined(getFieldValue(field))
+        && (!field.resetOnHide || !(field.hide || field.hideExpression));
+      if (setDefaultValue && field.resetOnHide) {
+        let parent = field.parent;
+        while (parent && !parent.hideExpression && !parent.hide) {
+          parent = parent.parent;
+        }
+        setDefaultValue = !parent || !(parent.hideExpression || parent.hide);
+      }
+
+      if (setDefaultValue) {
+        assignFieldValue(field, field.defaultValue);
+      }
     }
 
     this.initFieldWrappers(field);

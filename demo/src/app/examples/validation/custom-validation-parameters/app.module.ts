@@ -5,12 +5,8 @@ import { FormlyModule, FormlyFieldConfig } from '@ngx-formly/core';
 import { FormlyBootstrapModule } from '@ngx-formly/bootstrap';
 import { AppComponent } from './app.component';
 
-export function IpValidator(control: FormControl): ValidationErrors {
-  return !control.value || /(\d{1,3}\.){3}\d{1,3}/.test(control.value) ? null : { 'ip': true };
-}
-
-export function IpValidatorMessage(err, field: FormlyFieldConfig) {
-  return `"${field.formControl.value}" is not a valid IP Address`;
+export function dateFutureValidator(control: FormControl, field: FormlyFieldConfig, options = {}): ValidationErrors {
+  return { 'date-future': { message: `Validator options: ${JSON.stringify(options)}` } };
 }
 
 @NgModule({
@@ -20,10 +16,11 @@ export function IpValidatorMessage(err, field: FormlyFieldConfig) {
     FormlyBootstrapModule,
     FormlyModule.forRoot({
       validators: [
-        { name: 'ip', validation: IpValidator },
-      ],
-      validationMessages: [
-        { name: 'ip', message: IpValidatorMessage },
+        {
+          name: 'date-future',
+          validation: dateFutureValidator,
+          options: { days: 2 },
+        },
       ],
     }),
   ],

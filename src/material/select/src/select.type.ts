@@ -18,12 +18,13 @@ import { FieldType } from '@ngx-formly/material/form-field';
       [formControl]="formControl"
       [formlyAttributes]="field"
       [placeholder]="to.placeholder"
-      [tabindex]="to.tabindex"
+      [tabIndex]="to.tabindex"
       [required]="to.required"
-      [compareWith]="to.compareWith || compareWith"
+      [compareWith]="to.compareWith"
       [multiple]="to.multiple"
       (selectionChange)="change($event)"
       [errorStateMatcher]="errorStateMatcher"
+      [aria-label]="_getAriaLabel()"
       [aria-labelledby]="_getAriaLabelledby()"
       [disableOptionCentering]="to.disableOptionCentering"
       >
@@ -46,7 +47,12 @@ export class FormlyFieldSelect extends FieldType {
   @ViewChild(MatSelect, <any> { static: true }) formFieldControl!: MatSelect;
 
   defaultOptions = {
-    templateOptions: { options: [] },
+    templateOptions: {
+      options: [],
+      compareWith(o1: any, o2: any) {
+        return o1 === o2;
+      },
+    },
   };
 
   private selectAllValue!: { options: any, value: any[] };
@@ -69,16 +75,14 @@ export class FormlyFieldSelect extends FieldType {
         ? selectAllValue
         : [],
     );
+
+    this.formControl.markAsDirty();
   }
 
   change($event: MatSelectChange) {
     if (this.to.change) {
       this.to.change(this.field, $event);
     }
-  }
-
-  compareWith(o1: any, o2: any) {
-    return o1 === o2;
   }
 
   _getAriaLabelledby() {
@@ -90,7 +94,11 @@ export class FormlyFieldSelect extends FieldType {
       return this.formField._labelId;
     }
 
-    return null;
+    return undefined;
+  }
+
+  _getAriaLabel() {
+    return this.to.attributes ? this.to.attributes['aria-label'] : undefined;
   }
 
   private getSelectAllValue(options: any[]) {
@@ -103,7 +111,7 @@ export class FormlyFieldSelect extends FieldType {
 
       this.selectAllValue = {
         options,
-        value: flatOptions.map(o => o.value),
+        value: flatOptions.filter(o => !o.disabled).map(o => o.value),
       };
     }
 

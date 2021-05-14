@@ -3,6 +3,7 @@ import { ValidationErrors, AbstractControl } from '@angular/forms';
 import { FieldType } from './../templates/field.type';
 import { reverseDeepMerge, defineHiddenProp } from './../utils';
 import { FormlyFieldConfig, FormlyFieldConfigCache } from '../components/formly.field.config';
+import { Observable } from 'rxjs';
 
 export const FORMLY_CONFIG = new InjectionToken<FormlyConfig>('FORMLY_CONFIG');
 
@@ -21,7 +22,7 @@ export class FormlyConfig {
   types: {[name: string]: TypeOption} = {};
   validators: { [name: string]: ValidatorOption } = {};
   wrappers: { [name: string]: WrapperOption } = {};
-  messages: { [name: string]: string | ((error: any, field: FormlyFieldConfig) => string); } = {};
+  messages: { [name: string]: ValidationMessageOption['message'] } = {};
   templateManipulators: {
     preWrapper: ManipulatorWrapper[];
     postWrapper: ManipulatorWrapper[];
@@ -31,6 +32,7 @@ export class FormlyConfig {
   };
   extras: ConfigOption['extras'] = {
     checkExpressionOn: 'changeDetectionCheck',
+    lazyRender: false,
     showError: function(field: FieldType) {
       return field.formControl && field.formControl.invalid && (field.formControl.touched || (field.options.parentForm && field.options.parentForm.submitted) || !!(field.field.validation && field.field.validation.show));
     },
@@ -70,21 +72,17 @@ export class FormlyConfig {
         this.types[options.name] = <TypeOption>{ name: options.name };
       }
 
-      ['component', 'extends', 'defaultOptions'].forEach(prop => {
+      ['component', 'extends', 'defaultOptions', 'wrappers'].forEach(prop => {
         if (options.hasOwnProperty(prop)) {
           this.types[options.name][prop] = options[prop];
         }
       });
-
-      if (options.wrappers) {
-        options.wrappers.forEach((wrapper) => this.setTypeWrapper(options.name, wrapper));
-      }
     }
   }
 
   getType(name: string): TypeOption {
     if (!this.types[name]) {
-      throw new Error(`[Formly Error] There is no type by the name of "${name}"`);
+      throw new Error(`[Formly Error] The type "${name}" could not be found. Please make sure that is registered through the FormlyModule declaration.`);
     }
 
     this.mergeExtendedType(name);
@@ -134,11 +132,12 @@ export class FormlyConfig {
     }
 
     const { _resolver, _injector } = field.parent.options;
-    defineHiddenProp(
-      type,
-      '_componentRef',
-      _resolver.resolveComponentFactory<FieldType>(type.component).create(_injector),
-    );
+    const componentRef = _resolver
+      .resolveComponentFactory<FieldType>(type.component)
+      .create(_injector);
+
+    defineHiddenProp(type, '_componentRef', componentRef);
+    componentRef.destroy();
 
     return type['_componentRef'];
   }
@@ -154,7 +153,7 @@ export class FormlyConfig {
 
   getWrapper(name: string): WrapperOption {
     if (!this.wrappers[name]) {
-      throw new Error(`[Formly Error] There is no wrapper by the name of "${name}"`);
+      throw new Error(`[Formly Error] The wrapper "${name}" could not be found. Please make sure that is registered through the FormlyModule declaration.`);
     }
 
     return this.wrappers[name];
@@ -178,13 +177,13 @@ export class FormlyConfig {
 
   getValidator(name: string): ValidatorOption {
     if (!this.validators[name]) {
-      throw new Error(`[Formly Error] There is no validator by the name of "${name}"`);
+      throw new Error(`[Formly Error] The validator "${name}" could not be found. Please make sure that is registered through the FormlyModule declaration.`);
     }
 
     return this.validators[name];
   }
 
-  addValidatorMessage(name: string, message: string | ((error: any, field: FormlyFieldConfig) => string)) {
+  addValidatorMessage(name: string, message: ValidationMessageOption['message']) {
     this.messages[name] = message;
   }
 
@@ -226,12 +225,13 @@ export interface WrapperOption {
 }
 
 export interface FieldValidatorFn {
-  (c: AbstractControl, field: FormlyFieldConfig): ValidationErrors | null;
+  (c: AbstractControl, field: FormlyFieldConfig, options?: { [id: string]: any; }): ValidationErrors | null;
 }
 
 export interface ValidatorOption {
   name: string;
   validation: FieldValidatorFn;
+  options?: { [id: string]: any };
 }
 
 export interface ExtensionOption {
@@ -241,7 +241,7 @@ export interface ExtensionOption {
 
 export interface ValidationMessageOption {
   name: string;
-  message: string | ((error: any, field: FormlyFieldConfig) => string);
+  message: string | ((error: any, field: FormlyFieldConfig) => string | Observable<string>);
 }
 
 export interface ManipulatorOption {
@@ -275,9 +275,27 @@ export interface ConfigOption {
 
     /**
      * Defines the option which formly rely on to check field expression properties.
-     * - `modelChange`: perform a check when the value of the form control changes.
+     * - `modelChange`: perform a check when the value of the form control changes (Will be set by default in the next major version).
      * - `changeDetectionCheck`: triggers an immediate check when `ngDoCheck` is called.
-    */
+     *
+     * Defaults to `changeDetectionCheck`.
+     */
     checkExpressionOn?: 'modelChange' | 'changeDetectionCheck',
+
+    /**
+     * Whether to lazily render field components or not when marked as hidden.
+     * - `true`: lazily render field components (Will be set by default in the next major version).
+     * - `false`: render field components and use CSS to control their visibility.
+     *
+     * Defaults to `false`.
+     */
+    lazyRender?: boolean,
+
+    /**
+     * When true, reset the value of hidden fields.
+     *
+     * Defaults to `false`.
+     */
+    resetFieldOnHide?: boolean,
   };
 }

@@ -1,7 +1,7 @@
 import { FormGroup, AbstractControl, FormGroupDirective, FormArray, AsyncValidatorFn, ValidatorFn } from '@angular/forms';
 import { Subject, Observable } from 'rxjs';
 import { FieldType } from '../templates/field.type';
-import { TemplateManipulators } from '../services/formly.config';
+import { TemplateManipulators, ValidationMessageOption } from '../services/formly.config';
 import { ComponentFactoryResolver, ComponentRef, Injector } from '@angular/core';
 
 export interface FormlyFieldConfig {
@@ -22,7 +22,7 @@ export interface FormlyFieldConfig {
   /**
    * The key that relates to the model. This will link the field value to the model
    */
-  key?: string;
+  key?: string | number | string[];
 
   /**
    * This allows you to specify the `id` of your field. Note, the `id` is generated if not set.
@@ -48,7 +48,7 @@ export interface FormlyFieldConfig {
    */
   validation?: {
     messages?: {
-      [messageProperties: string]: string | ((error: any, field: FormlyFieldConfig) => string);
+      [messageProperties: string]: ValidationMessageOption['message'];
     };
     show?: boolean;
     [additionalProperties: string]: any;
@@ -61,7 +61,7 @@ export interface FormlyFieldConfig {
    *
    * {
    *   validation?: (string | ValidatorFn)[];
-   *   [key: string]: ((control: AbstractControl, field: FormlyFieldConfig) => boolean) | ({ expression: (control: AbstractControl, field: FormlyFieldConfig) => boolean, message: string | ((error, field: FormlyFieldConfig) => string) });
+   *   [key: string]: ((control: AbstractControl, field: FormlyFieldConfig) => boolean) | ({ expression: (control: AbstractControl, field: FormlyFieldConfig) => boolean, message: ValidationMessageOption['message'] });
    * }
    */
   validators?: any;
@@ -72,7 +72,7 @@ export interface FormlyFieldConfig {
    *
    * {
    *   validation?: (string | AsyncValidatorFn)[];
-   *   [key: string]: ((control: AbstractControl, field: FormlyFieldConfig) => Promise<boolean>) | ({ expression: (control: AbstractControl, field: FormlyFieldConfig) => Promise<boolean>, message: string });
+   *   [key: string]: ((control: AbstractControl, field: FormlyFieldConfig) => Promise<boolean> | Observable<boolean>) | ({ expression: (control: AbstractControl, field: FormlyFieldConfig) => Promise<boolean>, message: string });
    * }
    */
   asyncValidators?: any;
@@ -180,12 +180,13 @@ export interface FormlyFieldConfigCache extends FormlyFieldConfig {
   parent?: FormlyFieldConfigCache;
   options?: FormlyFormOptionsCache;
   _expressionProperties?: { [property: string]: ExpressionPropertyCache };
+  resetOnHide?: boolean;
   _hide?: boolean;
-  _validators?: ValidatorFn;
-  _asyncValidators?: AsyncValidatorFn;
+  _validators?: ValidatorFn[];
+  _asyncValidators?: AsyncValidatorFn[];
   _componentRefs?: ComponentRef<FieldType>[];
   _keyPath?: {
-    key: string;
+    key: FormlyFieldConfig['key'];
     path: string[];
   };
 }
@@ -238,19 +239,26 @@ export interface FormlyHookFn {
 export interface FormlyLifeCycleOptions<T = FormlyLifeCycleFn> {
   onInit?: T;
   onChanges?: T;
-  doCheck?: T;
   afterContentInit?: T;
-  afterContentChecked?: T;
   afterViewInit?: T;
-  afterViewChecked?: T;
   onDestroy?: T;
   [additionalProperties: string]: any;
+
+  /** @deprecated */
+  doCheck?: T;
+
+  /** @deprecated */
+  afterContentChecked?: T;
+
+  /** @deprecated */
+  afterViewChecked?: T;
 }
 
 export interface FormlyFormOptionsCache extends FormlyFormOptions {
   _checkField?: (field: FormlyFieldConfigCache, ignoreCache?: boolean) => void;
   _markForCheck?: (field: FormlyFieldConfigCache) => void;
   _buildForm?: () => void;
+  _buildField?: (field: FormlyFieldConfigCache) => FormlyFieldConfigCache;
   _resolver?: ComponentFactoryResolver;
   _injector?: Injector;
   _hiddenFieldsForCheck?: FormlyFieldConfigCache[];
@@ -270,5 +278,6 @@ export interface FormlyValueChangeEvent {
   field: FormlyFieldConfig;
   type: string;
   value: any;
+  [meta: string]: any;
 }
 

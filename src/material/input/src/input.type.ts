@@ -25,13 +25,13 @@ import { FieldType } from '@ngx-formly/material/form-field';
              [errorStateMatcher]="errorStateMatcher"
              [formControl]="formControl"
              [formlyAttributes]="field"
-             [tabindex]="to.tabindex"
+             [tabIndex]="to.tabindex"
              [placeholder]="to.placeholder">
     </ng-template>
   `,
 })
 export class FormlyFieldInput extends FieldType implements OnInit {
-  @ViewChild(MatInput, <any> { static: true }) formFieldControl!: MatInput;
+  @ViewChild(MatInput, <any> { static: false }) formFieldControl!: MatInput;
 
   get type() {
     return this.to.type || 'text';

@@ -13,6 +13,7 @@ import { FieldExpressionExtension } from './extensions/field-expression/field-ex
 import { FieldValidationExtension } from './extensions/field-validation/field-validation';
 import { FieldFormExtension } from './extensions/field-form/field-form';
 import { CoreExtension } from './extensions/core/core';
+import { FieldArrayType } from './templates/field-array.type';
 
 export function defaultFormlyConfig(formlyConfig: FormlyConfig): ConfigOption {
   return {
@@ -37,6 +38,7 @@ export function defaultFormlyConfig(formlyConfig: FormlyConfig): ConfigOption {
     FormlyGroup,
     FormlyValidationMessage,
     FormlyTemplateType,
+    FieldArrayType as any,
   ],
   entryComponents: [FormlyGroup, FormlyTemplateType],
   exports: [FormlyForm, FormlyField, FormlyAttributes, FormlyGroup, FormlyValidationMessage],
@@ -60,6 +62,7 @@ export class FormlyModule {
     return {
       ngModule: FormlyModule,
       providers: [
+        { provide: FORMLY_CONFIG, multi: true, useFactory: defaultFormlyConfig, deps: [FormlyConfig] },
         { provide: FORMLY_CONFIG, useValue: config, multi: true },
         { provide: ANALYZE_FOR_ENTRY_COMPONENTS, useValue: config, multi: true },
         FormlyFormBuilder,

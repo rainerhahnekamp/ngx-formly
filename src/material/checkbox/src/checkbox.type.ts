@@ -1,6 +1,7 @@
-import { Component, ViewChild } from '@angular/core';
+import { Component, ViewChild, Renderer2, AfterViewChecked, OnDestroy, AfterViewInit } from '@angular/core';
 import { FieldType } from '@ngx-formly/material/form-field';
 import { MatCheckbox } from '@angular/material/checkbox';
+import { FocusMonitor } from '@angular/cdk/a11y';
 
 @Component({
   selector: 'formly-field-mat-checkbox',
@@ -8,9 +9,8 @@ import { MatCheckbox } from '@angular/material/checkbox';
     <mat-checkbox
       [formControl]="formControl"
       [id]="id"
-      [required]="to.required"
       [formlyAttributes]="field"
-      [tabindex]="to.tabindex"
+      [tabIndex]="to.tabindex"
       [indeterminate]="to.indeterminate && formControl.value === null"
       [color]="to.color"
       [labelPosition]="to.align || to.labelPosition">
@@ -19,7 +19,7 @@ import { MatCheckbox } from '@angular/material/checkbox';
     </mat-checkbox>
   `,
 })
-export class FormlyFieldCheckbox extends FieldType {
+export class FormlyFieldCheckbox extends FieldType implements AfterViewInit, AfterViewChecked, OnDestroy {
   @ViewChild(MatCheckbox) checkbox!: MatCheckbox;
   defaultOptions = {
     templateOptions: {
@@ -32,8 +32,41 @@ export class FormlyFieldCheckbox extends FieldType {
     },
   };
 
+  private _required!: boolean;
+  constructor(private renderer: Renderer2, private focusMonitor: FocusMonitor) {
+    super();
+  }
+
   onContainerClick(event: MouseEvent): void {
     this.checkbox.focus();
     super.onContainerClick(event);
+  }
+
+  ngAfterViewInit() {
+    this.focusMonitor.monitor(this.checkbox._inputElement, true).subscribe(focusOrigin => {
+      if (focusOrigin) {
+        this.to.focus && this.to.focus(this.field);
+      } else {
+        this.to.blur && this.to.blur(this.field);
+      }
+    });
+  }
+
+  ngAfterViewChecked() {
+    if (this.required !== this._required && this.checkbox && this.checkbox._inputElement) {
+      this._required = this.required;
+      const inputElement = this.checkbox._inputElement.nativeElement;
+      if (this.required) {
+        this.renderer.setAttribute(inputElement, 'required', 'required');
+      } else {
+        this.renderer.removeAttribute(inputElement, 'required');
+      }
+    }
+  }
+
+  ngOnDestroy() {
+    if (this.checkbox) {
+      this.focusMonitor.stopMonitoring(this.checkbox._inputElement);
+    }
   }
 }

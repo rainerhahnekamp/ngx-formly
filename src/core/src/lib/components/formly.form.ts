@@ -3,9 +3,10 @@ import { FormGroup, FormArray, FormGroupDirective, FormControl } from '@angular/
 import { FormlyFieldConfig, FormlyFormOptions, FormlyFormOptionsCache } from './formly.field.config';
 import { FormlyFormBuilder } from '../services/formly.form.builder';
 import { FormlyConfig } from '../services/formly.config';
-import { assignModelValue, isNullOrUndefined, wrapProperty, clone, defineHiddenProp, getKeyPath } from '../utils';
+import { assignFieldValue, isNullOrUndefined, wrapProperty, clone, defineHiddenProp, getKeyPath, isObject } from '../utils';
 import { Subscription, Subject } from 'rxjs';
 import { debounceTime, switchMap, distinctUntilChanged, take } from 'rxjs/operators';
+import { clearControl } from '../extensions/field-form/utils';
 
 @Component({
   selector: 'formly-form',
@@ -28,7 +29,13 @@ export class FormlyForm implements DoCheck, OnChanges, OnDestroy {
 
   @Input()
   set model(model: any) { this._model = this.immutable ? clone(model) : model; }
-  get model() { return this._model || {}; }
+  get model() {
+    if (!this._model) {
+      this._model = {};
+    }
+
+    return this._model;
+  }
 
   @Input()
   set fields(fields: FormlyFieldConfig[]) { this._fields = this.immutable ? clone(fields) : fields; }
@@ -40,8 +47,23 @@ export class FormlyForm implements DoCheck, OnChanges, OnDestroy {
 
   @Output() modelChange = new EventEmitter<any>();
   @ViewChild('content') set content(content: ElementRef<HTMLElement>) {
-    if (content && content.nativeElement.nextSibling) {
-      console.warn(`NgxFormly: content projection for 'formly-form' component is deprecated since v5.5, you should avoid passing content inside the 'formly-form' tag.`);
+    if (content) {
+      let hasContent = false;
+      let node = content.nativeElement.nextSibling;
+      while (node && !hasContent) {
+        if (
+          node.nodeType === Node.ELEMENT_NODE
+          || node.nodeType === Node.TEXT_NODE && node.textContent && node.textContent.trim() !== ''
+        ) {
+          hasContent = true;
+        }
+
+        node = node.nextSibling;
+      }
+
+      if (hasContent) {
+        console.warn(`NgxFormly: content projection for 'formly-form' component is deprecated since v5.5, you should avoid passing content inside the 'formly-form' tag.`);
+      }
     }
   }
 
@@ -55,7 +77,7 @@ export class FormlyForm implements DoCheck, OnChanges, OnDestroy {
   private modelChangeSub = this.modelChange$.pipe(
     switchMap(() => this.ngZone.onStable.asObservable().pipe(take(1))),
   ).subscribe(() => this.ngZone.runGuarded(() => {
-    // runGuarded is used to keep in sync the expression changes
+    // runGuarded is used to keep the expression changes in-sync
     // https://github.com/ngx-formly/ngx-formly/issues/2095
     this.checkExpressionChange();
     this.modelChange.emit(this._modelChangeValue = clone(this.model));
@@ -83,6 +105,15 @@ export class FormlyForm implements DoCheck, OnChanges, OnDestroy {
   }
 
   ngOnChanges(changes: SimpleChanges) {
+    // https://github.com/ngx-formly/ngx-formly/issues/2294
+    if (changes.model && this.field) {
+      this.field.model = this.model;
+    }
+
+    if (changes.fields && this.form) {
+      clearControl(this.form);
+    }
+
     if (changes.fields || changes.form || (changes.model && this._modelChangeValue !== changes.model.currentValue)) {
       this.form = this.form || (new FormGroup({}));
       this.setOptions();
@@ -99,19 +130,7 @@ export class FormlyForm implements DoCheck, OnChanges, OnDestroy {
   }
 
   changeModel({ key, value, field }: { key: string, value: any, field: FormlyFieldConfig }) {
-    if (
-      value == null
-      && field['autoClear']
-      && !field.formControl.parent
-    ) {
-      const paths = key.split('.');
-      const k = paths.pop();
-      const m = paths.reduce((model, path) => model[path] || {}, this.model);
-      delete m[k];
-    } else {
-      assignModelValue(this.model, key.split('.'), value);
-    }
-
+    assignFieldValue(field, value);
     this.modelChange$.next();
   }
 
@@ -133,9 +152,9 @@ export class FormlyForm implements DoCheck, OnChanges, OnDestroy {
         // we should call `NgForm::resetForm` to ensure changing `submitted` state after resetting form
         // but only when the current component is a root one.
         if (this.options.parentForm && this.options.parentForm.control === this.form) {
-          this.options.parentForm.resetForm(model);
+          this.options.parentForm.resetForm(this.model);
         } else {
-          this.form.reset(model);
+          this.form.reset(this.model);
         }
       };
     }
@@ -187,7 +206,15 @@ export class FormlyForm implements DoCheck, OnChanges, OnDestroy {
     fields.forEach(field => {
       if (field.key && !field.fieldGroup) {
         const control = field.formControl;
-        let valueChanges = control.valueChanges.pipe(distinctUntilChanged());
+        let valueChanges = control.valueChanges.pipe(
+          distinctUntilChanged((x, y) => {
+            if (x !== y || Array.isArray(x) || isObject(x)) {
+              return false;
+            }
+
+            return true;
+          }),
+        );
 
         const { updateOn, debounce } = field.modelOptions;
         if ((!updateOn || updateOn === 'change') && debounce && debounce.default > 0) {
@@ -223,5 +250,9 @@ export class FormlyForm implements DoCheck, OnChanges, OnDestroy {
   private clearModelSubscriptions() {
     this.modelChangeSubs.forEach(sub => sub.unsubscribe());
     this.modelChangeSubs = [];
+  }
+
+  private get field(): any {
+    return this.fields && this.fields[0] && this.fields[0].parent;
   }
 }

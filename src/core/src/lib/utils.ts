@@ -17,17 +17,47 @@ export function getKeyPath(field: FormlyFieldConfigCache): string[] {
 
   /* We store the keyPath in the field for performance reasons. This function will be called frequently. */
   if (!field._keyPath || field._keyPath.key !== field.key) {
-    const key = field.key.indexOf('[') === -1
-      ? field.key
-      : field.key.replace(/\[(\w+)\]/g, '.$1');
+    let path: string[] = [];
+    if (typeof field.key === 'string') {
+      const key = field.key.indexOf('[') === -1
+        ? field.key
+        : field.key.replace(/\[(\w+)\]/g, '.$1');
+      path = key.indexOf('.') !== -1 ? key.split('.') : [key];
+    } else if (Array.isArray(field.key)) {
+      path = field.key.slice(0);
+    } else {
+      path = [`${field.key}`];
+    }
 
-    field._keyPath = { key: field.key, path: key.indexOf('.') !== -1 ? key.split('.') : [key] };
+    field._keyPath = { key: field.key, path };
   }
 
   return field._keyPath.path.slice(0);
 }
 
 export const FORMLY_VALIDATORS = ['required', 'pattern', 'minLength', 'maxLength', 'min', 'max'];
+
+export function assignFieldValue(field: FormlyFieldConfigCache, value: any) {
+  let paths = getKeyPath(field);
+  if (paths.length === 0) {
+    return;
+  }
+
+  let root = field;
+  while (root.parent) {
+    root = root.parent;
+    paths = [...getKeyPath(root), ...paths];
+  }
+
+  if (value === undefined && field.resetOnHide) {
+    const k = paths.pop();
+    const m = paths.reduce((model, path) => model[path] || {}, root.model);
+    delete m[k];
+    return;
+  }
+
+  assignModelValue(root.model, paths, value);
+}
 
 export function assignModelValue(model: any, paths: string[], value: any) {
   for (let i = 0; i < (paths.length - 1); i++) {
@@ -205,10 +235,10 @@ export function wrapProperty<T = any>(
 export function reduceFormUpdateValidityCalls(form: any, action: Function) {
   const updateValidity = form._updateTreeValidity.bind(form);
 
-  let updateValidityArgs = null;
-  form._updateTreeValidity = (...args) => updateValidityArgs = args;
+  let updateValidityArgs = { called: false, emitEvent: false };
+  form._updateTreeValidity = ({ emitEvent } = { emitEvent: true }) => updateValidityArgs = { called: true, emitEvent: emitEvent || updateValidityArgs.emitEvent };
   action();
 
-  updateValidityArgs && updateValidity(updateValidityArgs);
+  updateValidityArgs.called && updateValidity({ emitEvent: updateValidityArgs.emitEvent });
   form._updateTreeValidity = updateValidity;
 }

@@ -1,14 +1,21 @@
 import { Inject, Optional } from '@angular/core';
 import { FormArray } from '@angular/forms';
 import { FieldType } from './field.type';
-import { clone, isNullOrUndefined, assignModelValue, getKeyPath } from '../utils';
+import { clone, isNullOrUndefined, assignFieldValue } from '../utils';
 import { FormlyFormBuilder } from '../services/formly.form.builder';
 import { FormlyFieldConfig } from '../components/formly.field.config';
 import { FORMLY_CONFIG, FormlyExtension } from '../services/formly.config';
-import { registerControl, unregisterControl } from '../extensions/field-form/utils';
+import { registerControl, unregisterControl, findControl } from '../extensions/field-form/utils';
+import { Directive } from '@angular/core';
 
+// TODO remove `selector` in V6
+// tslint:disable-next-line
+@Directive({ selector: '[ɵfieldArray]' })
 export abstract class FieldArrayType<F extends FormlyFieldConfig = FormlyFieldConfig> extends FieldType<F> implements FormlyExtension {
-  formControl: FormArray;
+  get formControl() {
+    return this.field.formControl as FormArray;
+  }
+
   defaultOptions: any = {
     defaultValue: [],
   };
@@ -23,7 +30,8 @@ export abstract class FieldArrayType<F extends FormlyFieldConfig = FormlyFieldCo
 
   onPopulate(field: FormlyFieldConfig) {
     if (!field.formControl && field.key) {
-      registerControl(field, new FormArray([], { updateOn: field.modelOptions.updateOn }));
+      const control = findControl(field);
+      registerControl(field, control ? control : new FormArray([], { updateOn: field.modelOptions.updateOn }));
     }
 
     field.fieldGroup = field.fieldGroup || [];
@@ -45,7 +53,7 @@ export abstract class FieldArrayType<F extends FormlyFieldConfig = FormlyFieldCo
   add(i?: number, initialModel?: any, { markAsDirty } = { markAsDirty: true }) {
     i = isNullOrUndefined(i) ? this.field.fieldGroup.length : i;
     if (!this.model) {
-      assignModelValue(this.field.parent.model, getKeyPath(this.field), []);
+      assignFieldValue(this.field, []);
     }
 
     this.model.splice(i, 0, initialModel ? clone(initialModel) : undefined);

@@ -1,6 +1,7 @@
-import { Component, ViewChild } from '@angular/core';
+import { Component, ViewChild, AfterViewInit, OnDestroy } from '@angular/core';
 import { FieldType } from '@ngx-formly/material/form-field';
 import { MatRadioGroup } from '@angular/material/radio';
+import { ɵwrapProperty as wrapProperty } from '@ngx-formly/core';
 
 @Component({
   selector: 'formly-field-mat-radio',
@@ -14,13 +15,14 @@ import { MatRadioGroup } from '@angular/material/radio';
         [id]="id + '_' + i"
         [color]="to.color"
         [labelPosition]="to.labelPosition"
+        [disabled]="option.disabled"
         [value]="option.value">
         {{ option.label }}
       </mat-radio-button>
     </mat-radio-group>
   `,
 })
-export class FormlyFieldRadio extends FieldType {
+export class FormlyFieldRadio extends FieldType implements AfterViewInit, OnDestroy {
   @ViewChild(MatRadioGroup) radioGroup!: MatRadioGroup;
   defaultOptions = {
     templateOptions: {
@@ -31,14 +33,30 @@ export class FormlyFieldRadio extends FieldType {
     },
   };
 
-  onContainerClick(event: MouseEvent): void {
-    const isRadioClick = this.radioGroup._radios
-      .map(radioButton => radioButton._elementRef.nativeElement as HTMLElement)
-      .some(el => el.contains(event.target as Element));
+  private focusObserver!: Function;
+  ngAfterViewInit() {
+    this.focusObserver = wrapProperty(this.field, 'focus', ({ currentValue }) => {
+      if (
+        this.to.tabindex === -1
+        && currentValue
+        && this.radioGroup._radios.length > 0
+      ) {
+        // https://github.com/ngx-formly/ngx-formly/issues/2498
+        setTimeout(() => {
+          const radio = this.radioGroup.selected
+            ? this.radioGroup.selected
+            : this.radioGroup._radios.first;
 
-    if (!isRadioClick && this.radioGroup._radios.length && !this.radioGroup.selected) {
-      this.radioGroup._radios.first.focus();
-    }
-    super.onContainerClick(event);
+          radio._elementRef.nativeElement.focus({ preventScroll: true });
+        });
+      }
+    });
+  }
+
+  // TODO: find a solution to prevent scroll on focus
+  onContainerClick() {}
+
+  ngOnDestroy() {
+    this.focusObserver && this.focusObserver();
   }
 }

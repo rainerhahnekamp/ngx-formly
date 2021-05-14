@@ -28,7 +28,7 @@ describe('ng-add-schematic', () => {
     const packageJson = JSON.parse(getFileContent(tree, '/package.json'));
 
     // @TODO: list of themes should probably be retrieved from some config file
-    ['material', 'bootstrap', 'ionic', 'primeng', 'kendo'].forEach(theme => {
+    ['material', 'bootstrap', 'ionic', 'primeng', 'kendo', 'ng-zorro-antd'].forEach(theme => {
       expect(packageJson.dependencies[`@ngx-formly/${theme}`]).toBeUndefined();
     });
   });
@@ -51,7 +51,7 @@ describe('ng-add-schematic', () => {
     );
     expect(content).toMatch(
       // tslint:disable-next-line:trailing-comma
-      /FormlyModule.forRoot\(\)/
+      /FormlyModule.forRoot/
     );
     expect(content).toMatch(
       // tslint:disable-next-line:trailing-comma
@@ -104,7 +104,7 @@ describe('ng-add-schematic', () => {
     `);
 
     const tree = schematicRunner.runSchematic('ng-add', {
-      module: 'foo.module.ts',
+      module: 'app/foo.module.ts',
     }, appTree);
 
     const content = tree.readContent(fooModule);
@@ -115,7 +115,7 @@ describe('ng-add-schematic', () => {
     );
     expect(content).toMatch(
       // tslint:disable-next-line:trailing-comma
-      /FormlyModule.forRoot\(\)/
+      /FormlyModule.forRoot/
     );
     expect(content).toMatch(
       // tslint:disable-next-line:trailing-comma

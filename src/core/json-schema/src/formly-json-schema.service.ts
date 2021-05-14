@@ -1,10 +1,11 @@
 import { Injectable } from '@angular/core';
 import { FormlyFieldConfig } from '@ngx-formly/core';
 import { JSONSchema7, JSONSchema7TypeName } from 'json-schema';
-import { AbstractControl, FormControl } from '@angular/forms';
+import { AbstractControl, FormGroup } from '@angular/forms';
 import {
   ɵreverseDeepMerge as reverseDeepMerge,
   ɵgetFieldInitialValue as getFieldInitialValue,
+  ɵclone as clone,
 } from '@ngx-formly/core';
 
 export interface FormlyJsonschemaOptions {
@@ -16,8 +17,18 @@ export interface FormlyJsonschemaOptions {
   map?: (mappedField: FormlyFieldConfig, mapSource: JSONSchema7) => FormlyFieldConfig;
 }
 
+function isInteger(value: any) {
+  return Number.isInteger
+    ? Number.isInteger(value)
+    : typeof value === 'number' && Math.floor(value) === value;
+}
+
 function isEmpty(v: any) {
   return v === '' || v === undefined || v === null;
+}
+
+function isObject(v: any) {
+  return v != null && typeof v === 'object' && !Array.isArray(v);
 }
 
 function isConst(schema: JSONSchema7) {
@@ -25,24 +36,20 @@ function isConst(schema: JSONSchema7) {
 }
 
 function totalMatchedFields(field: FormlyFieldConfig): number {
-  if (field.key && !field.fieldGroup) {
-    return getFieldInitialValue(field) !== undefined ? 1 : 0;
+  if (!field.fieldGroup) {
+    return field.key && getFieldInitialValue(field) !== undefined ? 1 : 0;
   }
 
   return field.fieldGroup.reduce((s, f) => totalMatchedFields(f) + s, 0);
 }
 
-function isFieldValid(field: FormlyFieldConfig): boolean {
-  if (field.key) {
-    return field.formControl.valid;
-  }
-
-  return field.fieldGroup.every(f => isFieldValid(f));
-}
-
 interface IOptions extends FormlyJsonschemaOptions {
   schema: JSONSchema7;
-  autoClear?: boolean;
+  resetOnHide?: boolean;
+  shareFormControl?: boolean;
+  ignoreDefault?: boolean;
+  readOnly?: boolean;
+  key?: FormlyFieldConfig['key'];
 }
 
 @Injectable({ providedIn: 'root' })
@@ -51,7 +58,7 @@ export class FormlyJsonschema {
     return this._toFieldConfig(schema, { schema, ...(options || {}) });
   }
 
-  private _toFieldConfig(schema: JSONSchema7, options: IOptions): FormlyFieldConfig {
+  private _toFieldConfig(schema: JSONSchema7, { key, ...options }: IOptions): FormlyFieldConfig {
     schema = this.resolveSchema(schema, options);
 
     let field: FormlyFieldConfig = {
@@ -64,8 +71,25 @@ export class FormlyJsonschema {
       },
     };
 
-    if (options.autoClear) {
-      field['autoClear'] = true;
+    if (key != null) {
+      field.key = key;
+    }
+
+    if (!options.ignoreDefault && (schema.readOnly || options.readOnly)) {
+      field.templateOptions.disabled = true;
+      options = { ...options, readOnly: true };
+    }
+
+    if (options.resetOnHide) {
+      field['resetOnHide'] = true;
+    }
+
+    if (options.shareFormControl === false) {
+      field['shareFormControl'] = false;
+    }
+
+    if (options.ignoreDefault) {
+      delete field.defaultValue;
     }
 
     switch (field.type) {
@@ -96,7 +120,13 @@ export class FormlyJsonschema {
 
         if (schema.hasOwnProperty('multipleOf')) {
           field.templateOptions.step = schema.multipleOf;
-          this.addValidator(field, 'multipleOf', ({ value }) => isEmpty(value) || (value % schema.multipleOf === 0));
+          this.addValidator(field, 'multipleOf', ({ value }) => {
+            if (isEmpty(value) || typeof value !== 'number' || value === 0 || schema.multipleOf <= 0) {
+              return true;
+            }
+
+            return isInteger(value / schema.multipleOf);
+          });
         }
         break;
       }
@@ -117,40 +147,50 @@ export class FormlyJsonschema {
         field.fieldGroup = [];
 
         const [propDeps, schemaDeps] = this.resolveDependencies(schema);
-        Object.keys(schema.properties || {}).forEach(key => {
-          const f = this._toFieldConfig(<JSONSchema7> schema.properties[key], options);
+        Object.keys(schema.properties || {}).forEach(property => {
+          const f = this._toFieldConfig(<JSONSchema7> schema.properties[property], { ...options, key: property });
           field.fieldGroup.push(f);
-          f.key = key;
-          if (Array.isArray(schema.required) && schema.required.indexOf(key) !== -1) {
-            f.templateOptions.required = true;
-          }
-          if (f.templateOptions && !f.templateOptions.required && propDeps[key]) {
+          if (
+            (Array.isArray(schema.required) && schema.required.indexOf(property) !== -1)
+            || propDeps[property]
+          ) {
             f.expressionProperties = {
-              'templateOptions.required': m => m && propDeps[key].some(k => !isEmpty(m[k])),
+              'templateOptions.required': (m, s, f) => {
+                const { model, templateOptions: { required } } = f.parent ? f.parent : { templateOptions: {} } as any;
+                if (!model && !required) {
+                  return false;
+                }
+
+                if (Array.isArray(schema.required) && schema.required.indexOf(property) !== -1) {
+                  return true;
+                }
+
+                return propDeps[property] && propDeps[property].some(k => !isEmpty(m[k]));
+              },
             };
           }
 
-          if (schemaDeps[key]) {
+          if (schemaDeps[property]) {
             const getConstValue = (s: JSONSchema7) => {
               return s.hasOwnProperty('const') ? s.const : s.enum[0];
             };
 
-            const oneOfSchema = schemaDeps[key].oneOf;
+            const oneOfSchema = schemaDeps[property].oneOf;
             if (
               oneOfSchema
-              && oneOfSchema.every(o => o.properties && o.properties[key] && isConst(o.properties[key]))
+              && oneOfSchema.every(o => o.properties && o.properties[property] && isConst(o.properties[property]))
             ) {
               oneOfSchema.forEach(oneOfSchemaItem => {
-                const { [key]: constSchema, ...properties } = oneOfSchemaItem.properties;
+                const { [property]: constSchema, ...properties } = oneOfSchemaItem.properties;
                 field.fieldGroup.push({
-                  ...this._toFieldConfig({ ...oneOfSchemaItem, properties }, { ...options, autoClear: true }),
-                  hideExpression: m => !m || getConstValue(constSchema) !== m[key],
+                  ...this._toFieldConfig({ ...oneOfSchemaItem, properties }, { ...options, resetOnHide: true }),
+                  hideExpression: m => !m || getConstValue(constSchema) !== m[property],
                 });
               });
             } else {
               field.fieldGroup.push({
-                ...this._toFieldConfig(schemaDeps[key], options),
-                hideExpression: m => !m || isEmpty(m[key]),
+                ...this._toFieldConfig(schemaDeps[property], options),
+                hideExpression: m => !m || isEmpty(m[property]),
               });
             }
 
@@ -161,7 +201,7 @@ export class FormlyJsonschema {
           field.fieldGroup.push(this.resolveMultiSchema(
             'oneOf',
             <JSONSchema7[]> schema.oneOf,
-            options,
+            { ...options, shareFormControl: false },
           ));
         }
 
@@ -247,7 +287,7 @@ export class FormlyJsonschema {
 
     // map in possible formlyConfig options from the widget property
     if (schema['widget'] && schema['widget'].formlyConfig) {
-      field = reverseDeepMerge(schema['widget'].formlyConfig, field);
+      field = this.mergeFields(field, schema['widget'].formlyConfig);
     }
 
     // if there is a map function passed in, use it to allow the user to
@@ -312,26 +352,33 @@ export class FormlyJsonschema {
       fieldGroup: [
         {
           type: 'enum',
+          defaultValue: -1,
           templateOptions: {
             multiple: mode === 'anyOf',
             options: schemas
-              .map((s, i) => ({ label: s.title, value: i })),
+              .map((s, i) => ({ label: s.title, value: i, disabled: s.readOnly })),
           },
         },
         {
           fieldGroup: schemas.map((s, i) => ({
-            ...this._toFieldConfig(s, { ...options, autoClear: true }),
+            ...this._toFieldConfig(s, { ...options, resetOnHide: true }),
             hideExpression: (m, fs, f) => {
-              const selectField = f.parent.parent.fieldGroup[0];
-              if (!selectField.formControl) {
-                const value = f.parent.fieldGroup
+              const control = f.parent.parent.fieldGroup[0].formControl;
+              if (control.value === -1) {
+                let value = f.parent.fieldGroup
                   .map((f, i) => [f, i] as [FormlyFieldConfig, number])
-                  .filter(([f]) => isFieldValid(f))
+                  .filter(([f, i]) => {
+                    return this.isFieldValid(f, schemas[i], options);
+                  })
                   .sort(([f1], [f2]) => {
                     const matchedFields1 = totalMatchedFields(f1);
                     const matchedFields2 = totalMatchedFields(f2);
                     if (matchedFields1 === matchedFields2) {
-                      return 0;
+                      if (f1.templateOptions.disabled === f2.templateOptions.disabled) {
+                        return 0;
+                      }
+
+                      return f1.templateOptions.disabled ? 1 : -1;
                     }
 
                     return matchedFields2 > matchedFields1 ? 1 : -1;
@@ -339,12 +386,14 @@ export class FormlyJsonschema {
                   .map(([, i]) => i)
                 ;
 
-                const normalizedValue = [value.length === 0 ? 0 : value[0]];
-                const formattedValue = mode === 'anyOf' ? normalizedValue : normalizedValue[0];
-                selectField.formControl = new FormControl(formattedValue);
-              }
+                if (mode === 'anyOf') {
+                  const definedValue = value.filter(i => totalMatchedFields(f.parent.fieldGroup[i]));
+                  value = definedValue.length > 0 ? definedValue : [value[0] || 0];
+                }
 
-              const control = selectField.formControl;
+                value = value.length > 0 ? value : [0];
+                control.setValue(mode === 'anyOf' ? value : value[0]);
+              }
 
               return Array.isArray(control.value)
                 ? control.value.indexOf(i) === -1
@@ -449,8 +498,12 @@ export class FormlyJsonschema {
 
     const toEnum = (s: JSONSchema7) => {
       const value = s.hasOwnProperty('const') ? s.const : s.enum[0];
+      const option: any = { value: value, label: s.title || value };
+      if (s.readOnly) {
+        option.disabled = true;
+      }
 
-      return { value: value, label: s.title || value };
+      return option;
     };
 
     if (schema.anyOf) {
@@ -462,5 +515,27 @@ export class FormlyJsonschema {
     }
 
     return this.toEnumOptions(<JSONSchema7> schema.items);
+  }
+
+  private isFieldValid(field: FormlyFieldConfig, schema: JSONSchema7, options: IOptions): boolean {
+    const { form } = (field.options as any)._buildField({
+      form: new FormGroup({}),
+      fieldGroup: [this._toFieldConfig(schema, { ...options, resetOnHide: true, ignoreDefault: true, map: null })],
+      model: field.model ? clone(field.model) : (field.fieldArray ? [] : {}),
+    });
+
+    return form.valid;
+  }
+
+  private mergeFields(f1: FormlyFieldConfig, f2: FormlyFieldConfig) {
+    for (let prop in f2) {
+      if (isObject(f1[prop]) && isObject(f2[prop])) {
+        f1[prop] = this.mergeFields(f1[prop], f2[prop]);
+      } else if (f2[prop] != null) {
+        f1[prop] = f2[prop];
+      }
+    }
+
+    return f1;
   }
 }

@@ -1,5 +1,4 @@
 import { Component, ViewChild, AfterViewInit, TemplateRef } from '@angular/core';
-import { ɵdefineHiddenProp as defineHiddenProp } from '@ngx-formly/core';
 import { FieldType } from '@ngx-formly/material/form-field';
 import { MatInput } from '@angular/material/input';
 import { MatDatepickerInput } from '@angular/material/datepicker';
@@ -23,13 +22,20 @@ import { MatDatepickerInput } from '@angular/material/datepicker';
       (dateInput)="to.datepickerOptions.dateInput(field, $event)"
       (dateChange)="to.datepickerOptions.dateChange(field, $event)">
     <ng-template #datepickerToggle>
-      <mat-datepicker-toggle [for]="picker"></mat-datepicker-toggle>
+      <mat-datepicker-toggle [disabled]="to.disabled" [for]="picker"></mat-datepicker-toggle>
     </ng-template>
     <mat-datepicker #picker
       [color]="to.color"
-      [touchUi]="to.datepickerOptions.touchUi"
+      [dateClass]="to.datepickerOptions.dateClass"
+      [disabled]="to.datepickerOptions.disabled"
+      [opened]="to.datepickerOptions.opened"
+      [panelClass]="to.datepickerOptions.panelClass"
+      [startAt]="to.datepickerOptions.startAt"
       [startView]="to.datepickerOptions.startView"
-      [startAt]="to.datepickerOptions.startAt">
+      [touchUi]="to.datepickerOptions.touchUi"
+      (monthSelected)="to.datepickerOptions.monthSelected(field, $event, picker)"
+      (yearSelected)="to.datepickerOptions.yearSelected(field, $event, picker)"
+    >
     </mat-datepicker>
   `,
 })
@@ -45,6 +51,8 @@ export class FormlyDatepickerTypeComponent extends FieldType implements AfterVie
         datepickerTogglePosition: 'suffix',
         dateInput: () => {},
         dateChange: () => {},
+        monthSelected: () => {},
+        yearSelected: () => {},
       },
     },
   };
@@ -55,7 +63,16 @@ export class FormlyDatepickerTypeComponent extends FieldType implements AfterVie
     (<any> this.datepickerInput)._formField = this.formField;
 
     setTimeout(() => {
-      defineHiddenProp(this.field, '_mat' + this.to.datepickerOptions.datepickerTogglePosition, this.datepickerToggle);
+      switch (this.to.datepickerOptions.datepickerTogglePosition) {
+        case 'suffix':
+          this.to._matSuffix = this.datepickerToggle;
+          break;
+
+        case 'prefix':
+          this.to._matPrefix = this.datepickerToggle;
+          break;
+      }
+
       (<any> this.options)._markForCheck(this.field);
     });
   }

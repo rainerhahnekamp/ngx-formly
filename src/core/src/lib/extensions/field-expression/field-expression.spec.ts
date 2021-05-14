@@ -39,6 +39,48 @@ describe('FieldExpressionExtension', () => {
     builder = formlyBuilder;
   }));
 
+  describe('fieldChanges', () => {
+    it('should emit fieldChanges when expression value changes', () => {
+      const fields: FormlyFieldConfig[] = [
+        {
+          key: 'name',
+          expressionProperties: {
+            'templateOptions.label': 'field.formControl.value',
+          },
+        },
+      ];
+      const spy = jasmine.createSpy('fieldChanges spy');
+      const subscription = options.fieldChanges.subscribe(spy);
+
+      builder.buildForm(form, fields, {}, options);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(
+        {
+          field: fields[0],
+          type: 'expressionChanges',
+          property: 'templateOptions.label',
+          value: null,
+        },
+      );
+
+      spy.calls.reset();
+      form.get('name').patchValue('foo');
+      options._checkField({ formControl: form, fieldGroup: fields, options });
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(
+        {
+          field: fields[0],
+          type: 'expressionChanges',
+          property: 'templateOptions.label',
+          value: 'foo',
+        },
+      );
+
+      subscription.unsubscribe();
+    });
+  });
+
   describe('field visibility (hideExpression)', () => {
     it('should update field visibility', () => {
       const fields: FormlyFieldConfig[] = [
@@ -205,6 +247,27 @@ describe('FieldExpressionExtension', () => {
       expect(fields[0].formControl).toBe(form.get('key1'));
       expect(fields[1].hide).toBeTruthy();
       expect(fields[1].formControl).toBe(form.get('key1'));
+    });
+
+    it('should take account of parent hide state', () => {
+      const fields: FormlyFieldConfig[] = [
+        {
+          key: 'parent',
+          type: 'input',
+          hide: true,
+          fieldGroup: [
+            {
+              key: 'child',
+              type: 'input',
+              hideExpression: () => false,
+              defaultValue: 'foo',
+            },
+          ],
+        },
+      ];
+
+      builder.buildForm(form, fields, {}, options);
+      expect(fields[0].fieldGroup[0].hide).toBeTruthy();
     });
   });
 
@@ -492,6 +555,16 @@ describe('FieldExpressionExtension', () => {
         builder.buildForm(form, fields, model, options);
         expect(fields[0].formControl.value).toEqual('test');
       });
+    });
+
+    it('should supports array notation in expression property', () => {
+      const fields: FormlyFieldConfig[] = [
+        { expressionProperties: { 'model[0]': '"ddd"' } },
+      ];
+
+      const model = [];
+      builder.buildForm(form, fields, model, options);
+      expect(model).toEqual(['ddd']);
     });
 
     it('should throw error when assign to an undefined prop', () => {

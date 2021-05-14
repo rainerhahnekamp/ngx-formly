@@ -1,6 +1,6 @@
 import { FormlyExtension, FormlyConfig } from '../../services/formly.config';
 import { FormlyFieldConfigCache } from '../../components/formly.field.config';
-import { FormGroup, FormControl, AbstractControlOptions, Validators } from '@angular/forms';
+import { FormGroup, FormControl, AbstractControlOptions, Validators, ValidatorFn, AsyncValidatorFn } from '@angular/forms';
 import { getFieldValue, defineHiddenProp } from '../../utils';
 import { registerControl, findControl, updateValidity as updateControlValidity } from './utils';
 import { of } from 'rxjs';
@@ -10,12 +10,14 @@ export class FieldFormExtension implements FormlyExtension {
   constructor(private config: FormlyConfig) { }
 
   onPopulate(field: FormlyFieldConfigCache) {
-    if (field.key) {
-      this.addFormControl(field);
+    if (!field.parent) {
+      return;
     }
 
-    if (field.parent && field.fieldGroup && !field.key) {
+    if (field.fieldGroup && !field.key) {
       defineHiddenProp(field, 'formControl', field.parent.formControl);
+    } else {
+      this.addFormControl(field);
     }
   }
 
@@ -24,15 +26,23 @@ export class FieldFormExtension implements FormlyExtension {
       return;
     }
 
-    const updateValidity = this.setValidators(field);
-    updateValidity && (field.formControl as any)._updateTreeValidity();
+    const fieldsToUpdate = this.setValidators(field);
+    if (fieldsToUpdate.length === 0) {
+      return;
+    }
+
+    if (fieldsToUpdate.length === 1) {
+      fieldsToUpdate[0].formControl.updateValueAndValidity();
+    } else {
+      (field.formControl as any)._updateTreeValidity();
+    }
   }
 
   private addFormControl(field: FormlyFieldConfigCache) {
     let control = findControl(field);
     if (!control) {
       const controlOptions: AbstractControlOptions = { updateOn: field.modelOptions.updateOn };
-      const value = getFieldValue(field);
+      const value = field.key ? getFieldValue(field) : field.defaultValue;
 
       const ref = this.config ? this.config.resolveFieldTypeRef(field) : null;
       if (ref && ref.componentType && ref.componentType['createControl']) {
@@ -52,33 +62,26 @@ export class FieldFormExtension implements FormlyExtension {
 
   private setValidators(field: FormlyFieldConfigCache) {
     let updateValidity = false;
-    if (field.key) {
-      const {
-        formControl: c,
-        templateOptions: { disabled },
-      } = field;
-
+    if (field.key || !field.parent || (!field.key && !field.fieldGroup)) {
+      const { formControl: c } = field;
+      const disabled = field.templateOptions ? field.templateOptions.disabled : false;
       if (disabled && c.enabled) {
         c.disable({ emitEvent: false, onlySelf: true });
-        updateValidity = true;
+        if (!c.parent) {
+          updateControlValidity(c);
+        } else {
+          updateValidity = true;
+        }
       }
 
       if (null === c.validator || null === c.asyncValidator) {
         c.setValidators(() => {
-          const fields: FormlyFieldConfigCache[] = c['_fields'].length === 1
-            ? c['_fields']
-            : c['_fields'].filter(f => !f._hide);
-
-          const v = Validators.compose(fields.map(f => f._validators));
+          const v = Validators.compose(this.mergeValidators<ValidatorFn>(field, '_validators'));
 
           return v ? v(c) : null;
         });
         c.setAsyncValidators(() => {
-          const fields: FormlyFieldConfigCache[] = c['_fields'].length === 1
-            ? c['_fields']
-            : c['_fields'].filter(f => !f._hide);
-
-          const v = Validators.composeAsync(fields.map(f => f._asyncValidators));
+          const v = Validators.composeAsync(this.mergeValidators<AsyncValidatorFn>(field, '_asyncValidators'));
 
           return v ? v(c) : of(null);
         });
@@ -91,8 +94,34 @@ export class FieldFormExtension implements FormlyExtension {
       }
     }
 
-    (field.fieldGroup || []).forEach(f => this.setValidators(f) && (updateValidity = true));
+    const fieldsToUpdate = updateValidity ? [field] : [];
+    (field.fieldGroup || []).forEach(f => {
+      const childrenToUpdate = this.setValidators(f);
+      if (!updateValidity) {
+        fieldsToUpdate.push(...childrenToUpdate);
+      }
+    });
 
-    return updateValidity;
+    return fieldsToUpdate;
+  }
+
+  private mergeValidators<T>(field: FormlyFieldConfigCache, type: '_validators' | '_asyncValidators'): T[] {
+    const validators: any = [];
+    const c = field.formControl;
+    if (c && c['_fields'] && c['_fields'].length > 1) {
+      c['_fields']
+        .filter((f: FormlyFieldConfigCache) => !f._hide)
+        .forEach((f: FormlyFieldConfigCache) => validators.push(...f[type]));
+    } else if (field[type]) {
+      validators.push(...field[type]);
+    }
+
+    if (field.fieldGroup) {
+      field.fieldGroup
+        .filter(f => !f.key && f.fieldGroup)
+        .forEach(f => validators.push(...this.mergeValidators(f, type)));
+    }
+
+    return validators;
   }
 }

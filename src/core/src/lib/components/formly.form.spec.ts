@@ -67,6 +67,128 @@ describe('FormlyForm Component', () => {
       ]});
   });
 
+  describe('resetFieldOnHide', () => {
+    let fixture: ReturnType<typeof createTestComponent>;
+    beforeEach(() => {
+      app = { form: new FormGroup({}), options: {}, model: {}, fields: [] };
+      fixture = createTestComponent('<formly-form [form]="form" [fields]="fields" [model]="model" [options]="options"></formly-form>');
+      const config = TestBed.get(FormlyConfig) as FormlyConfig;
+      config.extras.resetFieldOnHide = true;
+    });
+
+    it('should set default value when hide is false', () => {
+      fixture.componentInstance.fields = [
+        { key: 'foo', defaultValue: 'test' },
+      ];
+      fixture.detectChanges();
+
+      const { model } = fixture.componentInstance;
+      expect(model).toEqual({ foo: 'test' });
+    });
+
+    it('should delete prop when default value is undefined', () => {
+      fixture.componentInstance.fields = [
+        { key: 'foo', defaultValue: null },
+        { key: 'bar', defaultValue: undefined },
+      ];
+      fixture.detectChanges();
+
+      const { model } = fixture.componentInstance;
+      expect(model).toEqual({ foo: null });
+    });
+
+    it('should not set default value clear on hide', () => {
+      fixture.componentInstance.fields = [
+        { key: 'foo', defaultValue: 'test', hide: true },
+      ];
+      fixture.detectChanges();
+
+      const { model } = fixture.componentInstance;
+      expect(model).toEqual({});
+    });
+
+    it('should toggle default value on hide changes', () => {
+      fixture.componentInstance.fields = [
+        { key: 'foo', defaultValue: 'test' },
+      ];
+      fixture.detectChanges();
+
+      const { model, fields } = fixture.componentInstance;
+
+      fields[0].hide = true;
+      fixture.detectChanges();
+      expect(model).toEqual({});
+
+      fields[0].hide = false;
+      fixture.detectChanges();
+      expect(model).toEqual({ foo: 'test' });
+    });
+
+    it('should toggle default value on hide changes for nested config', () => {
+      fixture.componentInstance.fields = [
+        {
+          key: 'foo',
+          fieldGroup: [
+            { key: 'bar', defaultValue: 'test' },
+          ],
+        },
+      ];
+      fixture.detectChanges();
+
+      const { model, fields } = fixture.componentInstance;
+
+      fields[0].hide = true;
+      fixture.detectChanges();
+      expect(model).toEqual({});
+
+      fields[0].hide = false;
+      fixture.detectChanges();
+      expect(model).toEqual({ foo: { bar: 'test' } });
+    });
+
+    it('should set default value for field array', () => {
+      fixture.componentInstance.fields = [
+        {
+          key: 'foo',
+          type: 'repeat',
+          defaultValue: [null],
+          fieldArray: { type: 'text' },
+        },
+      ];
+      fixture.detectChanges();
+
+      const { model, fields } = fixture.componentInstance;
+      expect(model).toEqual({ foo: [null] });
+      expect(fields[0].fieldGroup.length).toEqual(1);
+    });
+
+    it('should toggle default value on hide changes for field array', () => {
+      fixture.componentInstance.fields = [
+        {
+          key: 'foo',
+          type: 'repeat',
+          defaultValue: [null],
+          fieldArray: { type: 'text' },
+        },
+      ];
+
+      const { model, fields } = fixture.componentInstance;
+      fixture.detectChanges();
+      expect(model).toEqual({ foo: [null] });
+      expect(fields[0].fieldGroup.length).toEqual(1);
+
+      fields[0].hide = true;
+      fixture.detectChanges();
+      expect(model).toEqual({});
+      expect(fields[0].fieldGroup.length).toEqual(0);
+
+      fields[0].hide = false;
+      fixture.detectChanges();
+      expect(model).toEqual({ foo: [null] });
+      expect(fields[0].fieldGroup.length).toEqual(1);
+    });
+  });
+
   describe('immutable attr', () => {
     beforeEach(() => {
       app = {
@@ -132,6 +254,32 @@ describe('FormlyForm Component', () => {
       expect(app.model).toEqual({});
       subscription.unsubscribe();
     });
+  });
+
+  it('lazy render components', () => {
+    TestBed.configureTestingModule({
+      imports: [
+        FormlyModule.forRoot({
+          extras: { lazyRender: true },
+        }),
+      ],
+    });
+    app = {
+      form: new FormGroup({}),
+      options: {},
+      model: {},
+      fields: [{
+        key: 'foo',
+        type: 'text',
+        hide: true,
+      }],
+    };
+
+    const fixture = createTestComponent('<formly-form [form]="form" [fields]="fields" [model]="model" [options]="options"></formly-form>');
+    expect(fixture.debugElement.query(By.css('input'))).toBeNull();
+
+    app.fields[0].hide = false;
+    expect(fixture.debugElement.query(By.css('input'))).not.toBeNull();
   });
 
   describe('modelChange output', () => {
@@ -457,6 +605,19 @@ describe('FormlyForm Component', () => {
     expect(app.model.investments.length).toEqual(0);
   });
 
+  it('should take account of default value on resetModel', () => {
+    app = {
+      fields: [{ key: 'name', defaultValue: 'defaultValue' }],
+      form: new FormGroup({}),
+      options: {},
+      model: {},
+    };
+    createTestComponent('<formly-form [form]="form" [fields]="fields" [model]="model" [options]="options"></formly-form>');
+
+    app.options.resetModel();
+    expect(app.model).toEqual({ 'name': 'defaultValue' });
+  });
+
   // https://github.com/ngx-formly/ngx-formly/issues/1872
   it('should clone initialModel during reset model', () => {
     app = {
@@ -544,6 +705,23 @@ describe('FormlyForm Component', () => {
     expect(app.form.valid).toEqual(false);
   });
 
+  it('should update validation on fields input change', () => {
+    app = {
+      fields: [{ key: 'name' }],
+      form: new FormGroup({}),
+      options: {},
+      model: {},
+    };
+
+    const fixture = createTestComponent('<formly-form [form]="form" [fields]="fields" [model]="model" [options]="options"></formly-form>');
+
+    expect(app.form.valid).toEqual(true);
+
+    fixture.componentInstance.fields = [{ key: 'name', templateOptions: { required: true } }];
+    fixture.detectChanges();
+
+    expect(app.form.valid).toEqual(false);
+  });
 
   it('should update the form controls when changing the model', () => {
     app = {
@@ -671,6 +849,22 @@ describe('FormlyForm Component', () => {
       app.model.address.city = 'test';
       fixture.detectChanges();
       expect(form.get('address.city').value).toEqual('test');
+    });
+
+    it('should support passing number or array path to field key', () => {
+      const form = new FormGroup({});
+      app.form = form;
+      app.model = {};
+      app.fields = [
+        { key: 1, defaultValue: 'number' },
+        { key: ['this:is:a:valid:property:for:a:json:object:1.0'], defaultValue: 'array' },
+      ];
+
+      createTestComponent('<formly-form [form]="form" [fields]="fields" [model]="model"></formly-form>');
+      expect(app.model).toEqual({
+        1: 'number',
+        'this:is:a:valid:property:for:a:json:object:1.0': 'array',
+      });
     });
 
     it('should hide/display field using a function with nested field key', fakeAsync(() => {

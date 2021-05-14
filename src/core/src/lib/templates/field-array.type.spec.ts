@@ -64,6 +64,27 @@ describe('Array Field Type', () => {
     expect(app.form.dirty).toBeTruthy();
   });
 
+  it('should work with nullable model', () => {
+    app.model = { array: null };
+    app.fields = [{
+      key: 'array',
+      type: 'array',
+      defaultValue: null,
+    }];
+
+    const fixture = createFormlyTestComponent();
+    expect(app.form.dirty).toBeFalsy();
+
+    fixture.nativeElement.querySelector('#add').click();
+    fixture.detectChanges();
+    expect(app.form.dirty).toBeTruthy();
+
+    app.form.markAsPristine();
+    fixture.nativeElement.querySelector('#remove-0').click();
+    fixture.detectChanges();
+    expect(app.form.dirty).toBeTruthy();
+  });
+
   it('should support field without key', () => {
     app.form = new FormArray([]);
     app.fields = [{ type: 'array' }];
@@ -184,6 +205,56 @@ describe('Array Field Type', () => {
     subscription.unsubscribe();
   });
 
+  it('should not triggers valueChanges for all fields on add/remove', () => {
+    app.fields = [
+      {
+        key: 'foo',
+        type: 'array',
+        fieldArray: { key: 'title' },
+      },
+      {
+        key: 'bar',
+        type: 'array',
+        fieldArray: { key: 'title' },
+      },
+    ];
+
+    const fixture = createFormlyTestComponent();
+    const spy = jasmine.createSpy('model change spy');
+    const subscription = app.form.get('bar').valueChanges.subscribe(spy);
+
+    // add
+    fixture.nativeElement.querySelector('#add').click();
+    fixture.detectChanges();
+
+    expect(spy).not.toHaveBeenCalled();
+
+    // remove
+    fixture.nativeElement.querySelector('#remove-0').click();
+    fixture.detectChanges();
+
+    expect(spy).not.toHaveBeenCalled();
+    subscription.unsubscribe();
+  });
+
+  it('should share formControl when field key is duplicated', () => {
+    app.fields = [
+      {
+        key: 'foo',
+        type: 'array',
+        fieldArray: { key: 'firtname' },
+      },
+      {
+        key: 'foo',
+        type: 'array',
+        fieldArray: { key: 'lastname' },
+      },
+    ];
+
+    createFormlyTestComponent();
+    expect(app.fields[0].formControl).toEqual(app.fields[1].formControl);
+  });
+
   it('should not reuse the remove controls', () => {
     app.model = { array: null };
     app.fields = [{
@@ -210,6 +281,23 @@ describe('Array Field Type', () => {
 
     expect(form.at(1)).not.toEqual(form.at(0));
     expect(form.at(1).value).toEqual(null);
+  });
+
+  // https://github.com/ngx-formly/ngx-formly/issues/2493
+  it('should add field when model is null', () => {
+    app.model = null;
+    app.fields = [{
+      key: 'array',
+      type: 'array',
+    }];
+
+    const fixture = createFormlyTestComponent();
+
+    fixture.nativeElement.querySelector('#add').click();
+    fixture.detectChanges();
+
+    expect(app.fields[0].fieldGroup.length).toEqual(1);
+    expect(app.form.value).toEqual({ array: [null] });
   });
 });
 

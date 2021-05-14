@@ -605,8 +605,6 @@ describe('FormlyFormBuilder service', () => {
   describe('initialise field validators', () => {
     const expectValidators = (invalidValue, validValue, errors?) => {
       const formControl = form.get('title');
-      expect(typeof field._validators === 'function').toBeTruthy();
-
       formControl.patchValue(invalidValue);
       expect(formControl.valid).toBeFalsy();
       if (errors) {
@@ -619,7 +617,6 @@ describe('FormlyFormBuilder service', () => {
 
     const expectAsyncValidators = (value) => {
       const formControl = form.get('title');
-      expect(typeof field._asyncValidators === 'function').toBeTruthy();
 
       formControl.patchValue(value);
       expect(formControl.status).toBe('PENDING');
@@ -636,6 +633,30 @@ describe('FormlyFormBuilder service', () => {
           builder.buildForm(form, [field], {}, {});
 
           expectValidators(null, 'test');
+        });
+
+        it(`pass parameters to pre-defined type`, () => {
+          const spy = jasmine.createSpy('validator_with_options');
+          TestBed.get(FormlyConfig).setValidator({
+            name: 'required_with_options',
+            validation: spy,
+          });
+          const validation = { name: 'required_with_options', options: { foo: 'true' } };
+          field.validators = { validation: [validation] };
+          builder.buildForm(form, [field], {}, {});
+          expect(spy).toHaveBeenCalledWith(field.formControl, field, validation.options);
+        });
+
+        it(`pass parameters to FormlyConfig validator`, () => {
+          const spy = jasmine.createSpy('validator_with_options');
+          TestBed.get(FormlyConfig).setValidator({
+            name: 'required_with_options',
+            validation: spy,
+            options: { foo: 'true' },
+          });
+          field.validators = { validation: [{ name: 'required_with_options' }] };
+          builder.buildForm(form, [field], {}, {});
+          expect(spy).toHaveBeenCalledWith(field.formControl, field, { foo: 'true' });
         });
 
         it(`using custom type`, () => {
